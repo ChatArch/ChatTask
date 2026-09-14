@@ -1,0 +1,68 @@
+site_name: ChatTask 文档
+site_url: https://arch.gh.wzhecnu.cn/ChatTask/
+repo_url: https://github.com/ChatArch/ChatTask
+repo_name: ChatArch/ChatTask
+edit_uri: edit/main/docs/
+docs_dir: docs/
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.action.edit
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: zh
+          default: true
+          name: 中文
+          build: true
+          site_name: ChatTask 文档
+        - locale: en
+          name: English
+          build: true
+          site_name: ChatTask Documentation
+          nav_translations:
+            首页: Home
+            命令与接口: Commands and APIs
+            CLI 树: CLI Tree
+            能力地图: Capability Map
+            Python 接口树: Python Interface Tree
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+extra:
+  alternate:
+    - name: 中文
+      link: /ChatTask/
+      lang: zh
+    - name: English
+      link: /ChatTask/en/
+      lang: en
+nav:
+  - 首页: index.md
+  - 命令与接口:
+      - CLI 树: cli-tree.md
+      - 能力地图: capability-map.md
+      - Python 接口树: interface-tree.md

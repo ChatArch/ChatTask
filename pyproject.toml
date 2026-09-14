@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ChatTask"
+dynamic = ["version"]
+description = "ChatTask: a ChatArch Python package."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = ["click>=8.0", "chatstyle>=0.2.0,<0.3.0", "chatenv>=0.2.11,<0.3.0"]
+authors = [{name = "ChatArch", email = "rex@chatarch.org"}]
+keywords = ["chattask", "chatarch", "cli"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/ChatArch/ChatTask"
+Repository = "https://github.com/ChatArch/ChatTask"
+Documentation = "https://arch.gh.wzhecnu.cn/ChatTask/"
+
+[project.scripts]
+chattask = "chattask.cli:main"
+
+[project.optional-dependencies]
+dev = ["build", "pytest", "twine"]
+docs = ["mkdocs>=1.6,<2.0", "mkdocs-material>=9.5,<9.7", "mkdocs-static-i18n>=1.2,<2.0", "mike>=2.0,<3.0"]
+
+[tool.setuptools.dynamic]
+version = {attr = "chattask.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+include-package-data = true

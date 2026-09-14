@@ -17,7 +17,7 @@
 
 # ChatTask
 
-ChatTask is a ChatArch Python package. Version `0.0.1` is a registration placeholder with the standard CLI skeleton only; domain features are not defined or implemented yet.
+ChatTask is a ChatArch Python package. Version `0.0.2` validates the release pipeline with the standard CLI skeleton only; domain features are not defined or implemented yet.
 
 
 Documentation entry: <https://arch.gh.wzhecnu.cn/ChatTask/en/>

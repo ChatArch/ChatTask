@@ -17,7 +17,7 @@
 
 # ChatTask
 
-ChatTask 是 ChatArch 系列 Python 包。当前 `0.0.1` 为注册占位版本，仅提供标准命令行骨架，业务功能尚未定义或实现。
+ChatTask 是 ChatArch 系列 Python 包。当前 `0.0.2` 为发布链路验证版本，仅提供标准命令行骨架，业务功能尚未定义或实现。
 
 
 文档入口：<https://arch.gh.wzhecnu.cn/ChatTask/>

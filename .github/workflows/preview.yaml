@@ -10,6 +10,10 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: docs-pages
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -27,6 +31,7 @@ jobs:
       - run: python -m pip install -e ".[docs]"
       - name: Deploy preview docs
         run: |
+          mkdocs build --strict
           git fetch origin gh-pages --depth=1 || true
           mike deploy dev --push --update-aliases --allow-empty
           site_url=$(python - <<'PY'

@@ -1,5 +1,13 @@
 # 更新记录
 
+## 0.1.0.dev0 — 未发布候选
+
+- 增加可导入的 TaskSettings、TaskService、create_app 与 state_paths；导入不安装或启动服务。
+- 复用 OpenSandbox 创建执行环境、生成/测试固定统计程序、维持有期限的 Bash 会话并回收；这不是通用自然语言 Agent。
+- 增加包内浏览器页面与同源 API、ChatLogin 认证/CSRF、ChatEnv typed profile。
+- 增加真实 serve 和 paths 命令；服务准备与 Docker/Python 安装仍由 ChatUp 或既有运行环境负责。
+- 普通 Docker/runc 仅供受信用户实验，不声明强隔离或多租户生产能力。
+
 ## 0.0.2 — 2026-09-14
 
 - 通过 GitHub Actions 与 PyPI Trusted Publisher 发布的基础验证版本。

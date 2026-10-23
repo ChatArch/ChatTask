@@ -1,65 +1,37 @@
-<div align="center">
-    <a href="https://pypi.python.org/pypi/ChatTask">
-        <img src="https://img.shields.io/pypi/v/ChatTask.svg" alt="PyPI version" />
-    </a>
-    <a href="https://github.com/ChatArch/ChatTask/actions/workflows/ci.yml">
-        <img src="https://github.com/ChatArch/ChatTask/actions/workflows/ci.yml/badge.svg" alt="Tests" />
-    </a>
-    <a href="https://arch.gh.wzhecnu.cn/ChatTask/">
-        <img src="https://img.shields.io/badge/docs-mkdocs-blue.svg" alt="Documentation" />
-    </a>
-</div>
-
-<div align="center">
-
-[English](README.en.md) | [简体中文](README.md)
-</div>
-
 # ChatTask
 
-ChatTask is a ChatArch Python package. Version `0.0.2` validates the release pipeline with the standard CLI skeleton only; domain features are not defined or implemented yet.
+English | [简体中文](README.md)
 
+ChatTask provides reusable Task/Sandbox execution and an optional authenticated browser application. This source is an **unreleased 0.1.0.dev0 candidate**. Published PyPI 0.0.2 is still the earlier scaffold and does not provide these features.
 
-Documentation entry: <https://arch.gh.wzhecnu.cn/ChatTask/en/>
+- **One-shot task**: write a small Python integer-statistics program and tests inside a new OpenSandbox, return real output, then destroy it.
+- **Persistent session**: reuse a Sandbox and Bash across requests, preserving cwd, environment and files; explicitly destroy it or expire after five minutes.
+- **Shared Python/Web core**: TaskService, TaskSettings, create_app and state_paths. Importing the package does not install or start services.
+- **Shared components**: ChatEnv typed profiles, ChatStyle command trees and ChatLogin authentication/session/CSRF.
 
-Choose documentation by scenario:
-
-| Scenario | Document |
-| --- | --- |
-| Install the package, run the CLI, and confirm it works | `docs/cli-tree.en.md` |
-| Check first-class capabilities and current boundaries | `docs/capability-map.en.md` |
-| Call package behavior directly from Python | `docs/interface-tree.md` |
-
-## Quick Start
+## Run from source
 
 ```bash
-pip install -e ".[dev]"
-chattask --help
-chattask --version
+python -m pip install -e '.[web,dev]'
 chattask --tree
-chattask --tree-brief
-python -m pytest -q
-python -m build
+chattask paths --json-output
+chattask serve --env-profile site --host 127.0.0.1 --port 8000
 ```
 
-## CLI Contract
+Configure an existing OpenSandbox control plane, Docker access and an explicit site account first; see the [integration guide](docs/index.en.md). Environment preparation belongs to ChatUp or an existing deployment, never package import or browser requests.
 
-This template depends on `chatstyle>=0.2.0,<0.3.0` and `chatenv>=0.2.11,<0.3.0`. New commands should prefer:
+## Boundaries
 
-- `add_tree_option()` for shared `--tree` / `--tree-brief` flags and `render_click_tree()` to render registered Click metadata.
-- `CommandSchema` / `CommandField` for inputs.
-- `add_interactive_option()` for the shared `-i/-I` switch.
-- `resolve_command_inputs()` for missing args, defaults, TTY behavior, and validation.
-- No domain configuration or empty ChatEnv provider is registered yet. Reuse ChatEnv typed profiles when actual configuration is needed.
+This is a trusted, single-user experiment. The fixed statistics example is not a natural-language agent. Docker/runc is not a strong hostile-code isolation boundary. Anonymous execution, production multi-tenancy, full PTY, hours-long durability and shell recovery across service restarts are not supported. Login sessions are in memory; restart requires login again. Page refresh does not restore terminal history.
 
-## Layout
+[CLI](docs/cli-tree.en.md) · [Capabilities](docs/capability-map.en.md) · [Python API](docs/interface-tree.en.md)
 
-- `src/`: package source code
-- `tests/code-tests/`: code tests and migrated historical tests
-- `tests/cli-tests/`: real CLI tests, doc-first
-- `tests/mock-cli-tests/`: mock/fake CLI tests, doc-first
-- `docs/`: long-lived project docs built by mkdocs
+## Development
 
-## Development Notes
+```bash
+python -m pytest -q
+python -m build
+mkdocs build --strict
+```
 
-See `DEVELOP.md` and `AGENTS.md` before expanding the scaffold.
+Package publication, public documentation deployment and live-service cutover are separate acceptance gates. Candidate source is not a release.

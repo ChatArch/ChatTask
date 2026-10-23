@@ -1,35 +1,16 @@
-# Capability Map
+# Capability map
 
-Use this page to check which first-class capabilities `ChatTask` currently owns, which ones are verified, and what remains out of scope for this package.
+| Capability | Implementation | Boundary |
+|---|---|---|
+| One-shot task | TaskService.once: create/write/execute/test/result/destroy | Fixed integer statistics, not a free-text agent |
+| Persistent Bash | open_session/run_session/close_session | Sandbox and shell identities; five-minute logical session |
+| Cleanup | sweep/shutdown/container-port verification | Only owned environments; underlying TTL at most ten minutes |
+| Python reuse | TaskSettings/TaskService/create_app/state_paths | Import performs no connection, install or server startup |
+| Authenticated Web/API | Packaged assets, ChatLogin, Origin and CSRF | Trusted single-user experiment, in-memory login sessions |
+| Configuration | ChatEnv ChatTask typed profile | Sensitive keys/passwords; named profile never activates global defaults |
+| CLI | serve/paths/version/two tree forms | No fake registration or task-queue commands |
+| Environment setup | Existing ChatUp and OpenSandbox deployment | No host installer or infrastructure restart in business requests |
 
-## Capability Groups
+Not provided: full PTY, task database, MCP, natural-language agent, hostile-code hard isolation, production tenant authorization, hours-long durability or shell recovery across restarts. Web runs the expiry sweep; direct Python session callers own their sweep and explicit shutdown.
 
-<div class="grid cards" markdown>
-
-- **CLI Entry**
-
-    `chattask --help`, `chattask --version`, `chattask --tree`, and `chattask --tree-brief` are the default verification entry points.
-
-- **Python API**
-
-    Substantive behavior should live in importable Python functions, classes, or service layers rather than only in Click callbacks.
-
-- **Config and Environment**
-
-    There is no domain configuration yet. Reuse ChatEnv for stable, shared settings when needed.
-
-</div>
-
-## Current Boundary
-
-| Capability | Status | Notes |
-| --- | --- | --- |
-| CLI base entry | Implemented | The template generates a Click group, `--version`, shared ChatStyle tree options, and base tests. |
-| ChatEnv provider | Not enabled | No domain configuration or placeholder credential fields are needed yet. |
-| Business commands | Not implemented | Add these from the real package domain; do not fake future commands in the template. |
-
-## Out of Scope
-
-- No plan placeholder page is generated.
-- No unimplemented capability should be written as a user operation tutorial.
-- No secret, token, cookie, or Authorization header should appear in README, docs, issues, PR comments, or CI logs.
+Runtime compatibility is not an isolation guarantee. Docker/runc must not be presented as a public anonymous untrusted-code execution service.

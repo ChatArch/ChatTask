@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Task / Sandbox — 实验台</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <main class="shell">
+    <header class="masthead">
+      <div class="eyebrow"><span class="signal"></span> SANDBOX / TASK LAB <span class="slash">/</span> 01 <span class="account-controls"><span id="account-state">正在确认登录…</span> <button id="logout" type="button">退出登录</button></span></div>
+      <h1>任务进入，<em>环境启动。</em></h1>
+      <p class="intro">每次任务都在一个新 Sandbox 里运行，得到真实结果后回收；或者保留一个环境，分几步继续操作。</p>
+      <div class="note"><strong>实验边界</strong><span>登录后可操作 · 单用户实验 · Docker/runc 功能验证，不面向不可信代码；会话 5 分钟后回收</span></div>
+    </header>
+    <div class="columns">
+      <section class="panel" aria-labelledby="once-title">
+        <div class="panel-no">01 <span>一次性 Task</span></div>
+        <h2 id="once-title">生成、运行、返回。</h2>
+        <p>输入几个整数，服务会创建 Sandbox，在其中写一段 Python 统计程序和测试，运行后把结果交还，再销毁环境。</p>
+        <label for="numbers">输入数字 <span class="hint">逗号分隔 · 最多 8 个</span></label>
+        <div class="formline"><input id="numbers" value="2, 4, 6" autocomplete="off" inputmode="text"><button id="submit-task">执行任务 <span aria-hidden="true">↗</span></button></div>
+        <div id="task-state" class="status" role="status" aria-live="polite">等待任务</div>
+        <pre id="task-output" class="output" aria-label="一次性任务输出">提交后，这里会显示真实运行与清理结果。</pre>
+      </section>
+      <section class="panel dark" aria-labelledby="session-title">
+        <div class="panel-no">02 <span>持续会话</span></div>
+        <h2 id="session-title">在同一处，继续。</h2>
+        <p>建立一个真实 Sandbox 和持久 Bash。后续命令保留工作目录、变量与文件；结束时明确销毁。只供已登录的受信用户调试；刷新页面不会恢复终端记录。</p>
+        <div class="session-actions"><button id="open-session">创建 Sandbox <span aria-hidden="true">＋</span></button><button id="close-session" class="subtle" disabled>销毁会话</button></div>
+        <div id="session-state" class="status" role="status" aria-live="polite">尚无活动会话</div>
+        <label for="command">发送命令 <span class="hint">每条命令最多 8 秒</span></label>
+        <div class="formline"><input id="command" placeholder="pwd" autocomplete="off" disabled><button id="send-command" disabled>发送 ↗</button></div>
+        <div class="presets"><span>可以试试</span><button data-command="pwd">pwd</button><button data-command="export DEMO=hello">export</button><button data-command="echo $DEMO">echo $DEMO</button><button data-command="python -c 'print(2 + 2)'">Python</button></div>
+        <pre id="session-output" class="output" aria-label="持续会话输出">先创建会话，再发送命令。</pre>
+      </section>
+    </div>
+    <footer><span>任务流程：create → write → exec → test → destroy</span><span>会话流程：create → command × N → destroy</span></footer>
+  </main>
+</body>
+</html>

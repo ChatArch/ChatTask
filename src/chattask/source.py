@@ -60,7 +60,7 @@ class GitSource:
         if _git(root, 'status', '--porcelain=v1', '--untracked-files=all').strip():
             raise ValueError('registered Git source is dirty; review and clean it before running')
         sha = _git(root, 'rev-parse', '--verify', 'HEAD^{commit}').decode().strip()
-        tree_sha = _git(root, 'rev-parse', '--verify', 'HEAD^{tree}').decode().strip()
+        tree_sha = _git(root, 'rev-parse', '--verify', sha + '^{tree}').decode().strip()
         members = []
         entries = _git(root, 'ls-tree', '-r', '-z', sha).split(b'\0')
         for entry in entries:

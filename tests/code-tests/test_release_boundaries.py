@@ -46,6 +46,26 @@ class GitSourceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'private configuration'):
                 source.snapshot(repo)
 
+    def test_snapshot_uses_tree_from_the_pinned_commit(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory(dir=os.environ['CHATTASK_TEST_SCRATCH']) as temp:
+            root=Path(temp);commit='a'*40;tree='b'*40;blob='c'*40;calls=[]
+            def fake_git(path,*args):
+                calls.append(args)
+                if args==('rev-parse','--show-toplevel'):return str(root).encode()
+                if args==('status','--porcelain=v1','--untracked-files=all'):return b''
+                if args==('rev-parse','--verify','HEAD^{commit}'):return (commit+'\n').encode()
+                if args==('rev-parse','--verify',commit+'^{tree}'):return (tree+'\n').encode()
+                if args==('ls-tree','-r','-z',commit):return b'100644 blob '+blob.encode()+b'\ttracked.py\0'
+                if args==('cat-file','blob',blob):return b'print("pinned")\n'
+                raise AssertionError(args)
+            repo={'id':'demo','path':str(root),'github_repo':'owner/demo','default_branch':'main','package_name':'demo'}
+            with patch('chattask.source._git',side_effect=fake_git):
+                snap=GitSource().snapshot(repo)
+            self.assertEqual(snap['sha'],commit);self.assertEqual(snap['tree_sha'],tree)
+            self.assertIn(('rev-parse','--verify',commit+'^{tree}'),calls)
+            self.assertNotIn(('rev-parse','--verify','HEAD^{tree}'),calls)
+
     def test_snapshot_contains_every_accepted_tracked_blob_despite_export_ignore(self):
         with tempfile.TemporaryDirectory(dir=os.environ['CHATTASK_TEST_SCRATCH']) as temp:
             root=Path(temp)

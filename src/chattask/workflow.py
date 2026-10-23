@@ -271,7 +271,7 @@ class WorkflowService:
                       'repository_id': repo_id, 'github_repo': repo['github_repo'], 'package_name': repo.get('package_name', repo_id),
                       'default_branch': repo['default_branch'], 'repository_path': repo['path'], 'template_id': template_id, 'template_revision': template['revision'],
                       'steps': [{'kind': s['kind'], 'suite': s.get('suite'), 'status': 'pending'} for s in template['steps']],
-                      'source_sha': snap['sha'], 'version': version, 'install_extras': install_extras, 'pull_request': pull_request, 'status': 'queued',
+                      'source_sha': snap['sha'], 'source_tree': snap['tree_sha'], 'version': version, 'install_extras': install_extras, 'pull_request': pull_request, 'status': 'queued',
                       'created_at': now(), 'updated_at': now(), 'artifacts': [], 'approval': None, 'cleanup': None}
             self.store.put('runs', run_id, record)
         self.tasks[run_id] = asyncio.create_task(self._execute(run_id, snap['archive']))
@@ -366,14 +366,16 @@ class WorkflowService:
             run = self._owned(owner, run_id)
             if run['status'] != 'awaiting_approval':
                 raise ValueError('run is not awaiting release approval')
+            if not isinstance(run.get('source_tree'), str) or len(run['source_tree']) != 40:
+                raise ValueError('run lacks immutable source tree; create a fresh preflight before approval')
             expected = {'action': 'tag', 'repository_id': run['repository_id'], 'version': run['version'],
-                        'source_sha': run['source_sha'], 'confirmation': f"TAG {run['github_repo']} v{run['version']}"}
+                        'source_sha': run['source_sha'], 'source_tree': run['source_tree'], 'confirmation': f"TAG {run['github_repo']} v{run['version']}"}
             if not isinstance(body, dict) or body != expected:
                 raise ValueError('approval must match the exact immutable run target and confirmation')
             for item in run['artifacts']:
                 self.artifact(owner, run_id, item['name'])
             binding = hashlib.sha256(json.dumps({'repo': run['github_repo'], 'version': run['version'],
-                'sha': run['source_sha'], 'artifacts': run['artifacts'], 'pull_request': run['pull_request'], 'install_extras': run.get('install_extras', '')}, sort_keys=True).encode()).hexdigest()
+                'sha': run['source_sha'], 'tree': run['source_tree'], 'artifacts': run['artifacts'], 'pull_request': run['pull_request'], 'install_extras': run.get('install_extras', '')}, sort_keys=True).encode()).hexdigest()
             run['approval'] = {'action': 'tag', 'binding_sha256': binding, 'approved_at': now(), 'owner': owner}
             run['status'] = 'releasing'; run['updated_at'] = now()
             self.store.put('runs', run_id, run)

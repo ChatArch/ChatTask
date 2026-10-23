@@ -20,7 +20,7 @@ class WebWorkflowTests(unittest.TestCase):
             origin='http://testserver', username='operator', password='synthetic-password-canary',
             home=self.scratch.name)
         class Source:
-            def snapshot(self, repo): return {'sha': 'a' * 40, 'archive': b'synthetic tracked source'}
+            def snapshot(self, repo): return {'sha': 'a' * 40, 'tree_sha': 'c' * 40, 'archive': b'synthetic tracked source'}
         class Executor:
             async def execute(self, run, archive, update, cancelled, tool):
                 for index, step in enumerate(run['steps']):
@@ -87,11 +87,11 @@ class WebWorkflowTests(unittest.TestCase):
                 self.assertEqual(artifact.content, b'synthetic guest artifact')
                 self.assertEqual(artifact.headers['x-content-sha256'], hashlib.sha256(artifact.content).hexdigest())
                 wrong = {'action': 'tag', 'repository_id': 'demo', 'version': '9.9.9',
-                         'source_sha': 'a' * 40, 'confirmation': 'TAG owner/demo v9.9.9'}
+                         'source_sha': 'a' * 40, 'source_tree': 'c' * 40, 'confirmation': 'TAG owner/demo v9.9.9'}
                 self.assertEqual((await client.post('/api/runs/' + run_id + '/approve',
                     headers=headers, json=wrong)).status_code, 409)
                 exact = {'action': 'tag', 'repository_id': 'demo', 'version': '1.2.3',
-                         'source_sha': 'a' * 40, 'confirmation': 'TAG owner/demo v1.2.3'}
+                         'source_sha': 'a' * 40, 'source_tree': 'c' * 40, 'confirmation': 'TAG owner/demo v1.2.3'}
                 approved = await client.post('/api/runs/' + run_id + '/approve', headers=headers, json=exact)
                 self.assertEqual(approved.json()['status'], 'awaiting_publication')
                 self.assertNotIn('synthetic-key-canary', approved.text)

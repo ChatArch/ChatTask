@@ -6,7 +6,7 @@ from datetime import timedelta
 import hashlib
 import shlex
 import time
-from packaging.utils import parse_sdist_filename, parse_wheel_filename
+from packaging.utils import canonicalize_name, parse_sdist_filename, parse_wheel_filename
 from packaging.version import Version
 
 from opensandbox.models.execd import RunCommandOpts
@@ -100,7 +100,7 @@ class SandboxExecutor:
                                          '--outdir', '/workspace/dist'] if self.dependency_archive is not None else [
                                          'python', '-m', 'build', '--sdist', '--wheel', '--outdir', '/workspace/dist']
                         built = await self._command(sandbox, build_command, 130, cwd='/workspace/src')
-                        artifacts = await self._read_artifacts(sandbox, run['version'])
+                        artifacts = await self._read_artifacts(sandbox, run['version'], run['package_name'])
                         receipt = {'install_tools': install, 'build': built,
                                    'artifacts': [{k: v for k, v in item.items() if k != 'data'} for item in artifacts]}
                     elif kind == 'check':
@@ -167,7 +167,7 @@ class SandboxExecutor:
                                (receipt['stderr'] or receipt['stdout'] or receipt['error'] or '')[:300])
         return receipt
 
-    async def _read_artifacts(self, sandbox, target_version):
+    async def _read_artifacts(self, sandbox, target_version, package_name):
         entries = await asyncio.wait_for(sandbox.files.list_directory(DirectoryListEntry(path='/workspace/dist')),
                                          timeout=min(20, self._remaining()))
         names = sorted(e.path.rsplit('/', 1)[-1] for e in entries if e.path.endswith(('.whl', '.tar.gz')))
@@ -178,9 +178,11 @@ class SandboxExecutor:
             if not name or len(name) > 128 or '/' in name:
                 raise RuntimeError('invalid artifact name')
             try:
-                version = parse_wheel_filename(name)[1] if name.endswith('.whl') else parse_sdist_filename(name)[1]
+                distribution, version = (parse_wheel_filename(name)[:2] if name.endswith('.whl') else parse_sdist_filename(name))
             except Exception as exc:
                 raise RuntimeError('artifact filename is not valid distribution metadata') from exc
+            if canonicalize_name(distribution)!=canonicalize_name(package_name):
+                raise RuntimeError('artifact distribution name does not match the probed package')
             if version != Version(target_version):
                 raise RuntimeError('built artifact version does not match requested target')
             data = await asyncio.wait_for(sandbox.files.read_bytes('/workspace/dist/' + name),

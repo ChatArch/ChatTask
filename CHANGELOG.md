@@ -5,6 +5,7 @@
 - 增加版本化任务模板、CLI受信仓库登记、私有原子运行/步骤/产物账本、刷新重连与中断恢复标记。
 - 增加ChatPyPI元数据工具连接、真实Sandbox测试/构建/Twine检查、SHA256产物下载与合作式取消。
 - 增加针对已合并PR/精确检查的显式GitHub标签批准；标签后等待OIDC和PyPI独立核验，不伪报发布。
+- 批准绑定源码提交及树，要求合并PR、精确`test` CI/CI工作流和合版树均与预检一致；校验产物分发名与探测包名一致。
 - 新网页将模板设为主入口，保留旧整数Task与持续Shell实验。
 
 - 增加可导入的 TaskSettings、TaskService、create_app 与 state_paths；导入不安装或启动服务。

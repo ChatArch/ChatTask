@@ -60,6 +60,7 @@ class GitSource:
         if _git(root, 'status', '--porcelain=v1', '--untracked-files=all').strip():
             raise ValueError('registered Git source is dirty; review and clean it before running')
         sha = _git(root, 'rev-parse', '--verify', 'HEAD^{commit}').decode().strip()
+        tree_sha = _git(root, 'rev-parse', '--verify', 'HEAD^{tree}').decode().strip()
         entries = _git(root, 'ls-tree', '-r', '-z', sha).split(b'\0')
         for entry in entries:
             if not entry:
@@ -83,4 +84,4 @@ class GitSource:
                     raise ValueError('source archive contains unsupported entry')
                 if member.name.startswith('/') or '..' in Path(member.name).parts:
                     raise ValueError('unsafe source archive path')
-        return {'sha': sha, 'archive': archive}
+        return {'sha': sha, 'tree_sha': tree_sha, 'archive': archive}

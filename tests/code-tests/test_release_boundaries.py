@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 
@@ -31,6 +32,7 @@ class GitSourceTests(unittest.TestCase):
             repo = source.register('demo', str(root), 'owner/demo', package_name='demo')
             snap = source.snapshot(repo)
             self.assertEqual(snap['sha'], git('rev-parse', 'HEAD').decode().strip())
+            self.assertEqual(snap['tree_sha'], git('rev-parse', 'HEAD^{tree}').decode().strip())
             self.assertNotIn(b'private untracked', snap['archive'])
             (root / 'secret.txt').write_text('private untracked')
             with self.assertRaisesRegex(ValueError, 'dirty'):
@@ -117,6 +119,19 @@ class ProbeTruthTests(unittest.TestCase):
         self.assertTrue(result['cleanup']['not_created'])
 
 
+class ArtifactIdentityTests(unittest.TestCase):
+    def test_other_distribution_name_is_rejected_before_approval(self):
+        class Files:
+            async def list_directory(self,entry):
+                return [SimpleNamespace(path='/workspace/dist/other-1.2.3-py3-none-any.whl'),
+                        SimpleNamespace(path='/workspace/dist/other-1.2.3.tar.gz')]
+            async def read_bytes(self,path):return b'synthetic artifact'
+        executor=SandboxExecutor(SimpleNamespace())
+        executor._deadline=time.monotonic()+20
+        with self.assertRaisesRegex(RuntimeError,'distribution name'):
+            asyncio.run(executor._read_artifacts(SimpleNamespace(files=Files()),'1.2.3','demo'))
+
+
 class SandboxExecutorTests(unittest.TestCase):
     def test_guest_commands_deadlines_real_receipts_and_verified_cleanup(self):
         class Commands:
@@ -189,7 +204,9 @@ class AnnotatedTagReconciliationTests(unittest.TestCase):
         repo=Mock()
         repo.get_pull.return_value=SimpleNamespace(merged=True,base=SimpleNamespace(ref='main'),
                                                    head=SimpleNamespace(sha=source),merge_commit_sha=merged)
-        repo.get_commit.return_value.get_check_runs.return_value=[SimpleNamespace(status='completed',conclusion='success')]
+        repo.get_commit.return_value.get_check_runs.return_value=[SimpleNamespace(name='test',status='completed',conclusion='success')]
+        repo.get_git_commit.return_value.tree.sha='c'*40
+        repo.get_workflow_runs.return_value=[SimpleNamespace(name='CI',status='completed',conclusion='success')]
         repo.get_branch.return_value.commit.sha=merged
         repo.compare.return_value.status='identical'
         repo.get_contents.return_value.decoded_content=b'on:\n  push:\n    tags:\n      - "v*"\npermissions: id-token: write\nuses: pypa/gh-action-pypi-publish@release/v1'
@@ -197,7 +214,7 @@ class AnnotatedTagReconciliationTests(unittest.TestCase):
         repo.get_git_tag.return_value.object=SimpleNamespace(type='commit',sha=merged)
         provider=Mock();provider.get_repo.return_value=repo
         run={'pull_request':2,'github_repo':'owner/example','repository_path':'/operator/registered',
-             'default_branch':'main','source_sha':source,'version':'1.2.3'}
+             'default_branch':'main','source_sha':source,'source_tree':'c'*40,'version':'1.2.3'}
         outcome=ChatGHReleaseAdapter(provider=provider)._tag_sync(run)
         self.assertTrue(outcome['reconciled'])
         self.assertTrue(outcome['tag_verified'])
@@ -238,6 +255,42 @@ class CancellationTests(unittest.TestCase):
         self.assertTrue(result['cleanup']['container_absent'])
 
 
+class ImmutableReleaseInputTests(unittest.TestCase):
+    @staticmethod
+    def fixture(*,merge_tree='d'*40,check_names=('test','deploy')):
+        from unittest.mock import Mock
+        source='a'*40;merged='b'*40
+        repo=Mock()
+        repo.get_pull.return_value=SimpleNamespace(merged=True,base=SimpleNamespace(ref='main'),
+            head=SimpleNamespace(sha=source),merge_commit_sha=merged)
+        repo.get_commit.return_value.get_check_runs.return_value=[SimpleNamespace(name=n,status='completed',conclusion='success') for n in check_names]
+        repo.get_branch.return_value.commit.sha=merged
+        repo.compare.return_value.status='identical'
+        def git_commit(sha):
+            return SimpleNamespace(tree=SimpleNamespace(sha='c'*40 if sha==source else merge_tree))
+        repo.get_git_commit.side_effect=git_commit
+        repo.get_workflow_runs.return_value=[SimpleNamespace(name='CI',path='.github/workflows/ci.yml',
+            head_sha=source,event='pull_request',status='completed',conclusion='success')]
+        repo.get_contents.return_value.decoded_content=b'on:\n  push:\n    tags:\n      - "v*"\npermissions: id-token: write\nuses: pypa/gh-action-pypi-publish@release/v1'
+        repo.get_git_ref.return_value.object=SimpleNamespace(type='commit',sha=merged)
+        provider=Mock();provider.get_repo.return_value=repo
+        run={'github_repo':'owner/demo','pull_request':2,'default_branch':'main','source_sha':source,
+             'source_tree':'c'*40,'version':'1.2.3'}
+        return repo,provider,run
+
+    def test_merge_tree_must_equal_preflight_tree(self):
+        repo,provider,run=self.fixture(merge_tree='d'*40)
+        with self.assertRaisesRegex(ReleaseBlocked,'tree'):
+            ChatGHReleaseAdapter(provider=provider)._tag_sync(run)
+        repo.create_git_ref.assert_not_called()
+
+    def test_unrelated_green_check_cannot_substitute_for_ci_test(self):
+        repo,provider,run=self.fixture(merge_tree='c'*40,check_names=('deploy',))
+        with self.assertRaisesRegex(ReleaseBlocked,'CI|test'):
+            ChatGHReleaseAdapter(provider=provider)._tag_sync(run)
+        repo.create_git_ref.assert_not_called()
+
+
 class ReleaseGateTests(unittest.TestCase):
     def test_verified_tag_write_and_existing_target_reconciliation(self):
         merge_sha = 'b' * 40
@@ -248,7 +301,9 @@ class ReleaseGateTests(unittest.TestCase):
                 return SimpleNamespace(merged=True, base=SimpleNamespace(ref='main'),
                     head=SimpleNamespace(sha='a' * 40), merge_commit_sha=merge_sha)
             def get_commit(self, sha):
-                return SimpleNamespace(get_check_runs=lambda: [SimpleNamespace(status='completed', conclusion='success')])
+                return SimpleNamespace(get_check_runs=lambda: [SimpleNamespace(name='test', status='completed', conclusion='success')])
+            def get_git_commit(self, sha): return SimpleNamespace(tree=SimpleNamespace(sha='c'*40))
+            def get_workflow_runs(self, **kwargs): return [SimpleNamespace(name='CI', status='completed', conclusion='success')]
             def get_branch(self, branch): return SimpleNamespace(commit=SimpleNamespace(sha=merge_sha))
             def compare(self, base, head): return SimpleNamespace(status='identical')
             def get_contents(self, path, ref):
@@ -264,7 +319,7 @@ class ReleaseGateTests(unittest.TestCase):
             def create_git_ref(self, *, ref, sha): self.writes += 1; self.ref = sha
         repo = Repo(); adapter = ChatGHReleaseAdapter(provider=SimpleNamespace(get_repo=lambda _: repo))
         run = {'github_repo': 'owner/demo', 'pull_request': 1, 'default_branch': 'main',
-               'source_sha': 'a' * 40, 'version': '1.2.3'}
+               'source_sha': 'z' * 40, 'source_tree': 'c' * 40, 'version': '1.2.3'}
         first = asyncio.run(adapter.tag_after_merge(run))
         second = asyncio.run(adapter.tag_after_merge(run))
         self.assertTrue(first['tag_verified'])

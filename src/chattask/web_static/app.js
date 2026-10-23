@@ -293,7 +293,7 @@ function renderRun(run) {
   const lines = [
     `仓库 ${run.repository_id} / ${run.github_repo}`,
     `模板 ${run.template_id} · 修订 v${run.template_revision}`,
-    `版本 ${run.version} · 源 HEAD ${run.source_sha}${run.install_extras ? ' · 测试 extras ' + run.install_extras : ''}`,
+    `版本 ${run.version} · 源 HEAD ${run.source_sha}${run.source_tree ? ' · 树 ' + run.source_tree : ''}${run.install_extras ? ' · 测试 extras ' + run.install_extras : ''}`,
     `创建 ${run.created_at || '未知'} · 更新 ${run.updated_at || '未知'}`,
     run.cleanup ? `Sandbox 清理核验 ${run.cleanup.container_absent ? '容器已不存在' : '未确认'}${run.sandbox_id ? ' · ' + run.sandbox_id : ''}` : 'Sandbox 清理状态：尚无结果',
     run.release ? `标签 ${run.release.tag || '未创建'} · ${run.release.publication || '等待验证'}` : '',
@@ -395,7 +395,7 @@ $('approve-run').addEventListener('click', async () => {
   if (!run || templateBusy || $('approval-confirmation').value !== approvalPhrase(run)) return;
   templateBusy = true; deployTemplateControls();
   const body = {action: 'tag', repository_id: run.repository_id, version: run.version,
-                source_sha: run.source_sha, confirmation: approvalPhrase(run)};
+                source_sha: run.source_sha, source_tree: run.source_tree, confirmation: approvalPhrase(run)};
   try {
     const updated = await request(`/api/runs/${run.id}/approve`, 'POST', body);
     selectedRun = updated; renderRun(updated);

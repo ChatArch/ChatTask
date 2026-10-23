@@ -38,7 +38,7 @@ class WorkflowContracts(unittest.TestCase):
 
     def test_extras_reject_urls_and_shell_input(self):
         class Source:
-            def snapshot(self, repo): return {'sha': 'a' * 40, 'archive': b'archive'}
+            def snapshot(self, repo): return {'sha': 'a' * 40, 'tree_sha': 'c' * 40, 'archive': b'archive'}
         flow = WorkflowService(self.store, source=Source(), executor=None, tool_client=None)
         self.store.put('repositories', 'demo', {'id': 'demo', 'path': '/trusted/repo',
             'github_repo': 'owner/demo', 'default_branch': 'main'})
@@ -57,7 +57,7 @@ class WorkflowContracts(unittest.TestCase):
     def test_idempotent_create_and_recovery_do_not_replay(self):
         class Source:
             def snapshot(self, repo):
-                return {'sha': 'a' * 40, 'archive': b'archive'}
+                return {'sha': 'a' * 40, 'tree_sha': 'c' * 40, 'archive': b'archive'}
         class Executor:
             execute = AsyncMock(return_value={'steps': [], 'artifacts': [], 'cleanup': {'container_absent': True}})
         flow = WorkflowService(self.store, source=Source(), executor=Executor(), tool_client=None)
@@ -79,7 +79,7 @@ class WorkflowContracts(unittest.TestCase):
         data = b'wheel bytes'
         digest = hashlib.sha256(data).hexdigest()
         self.store.put('runs', 'b' * 32, {'id': 'b' * 32, 'owner': 'operator', 'status': 'awaiting_approval',
-            'repository_id': 'demo', 'github_repo': 'owner/demo', 'pull_request': 1, 'version': '1.2.3', 'source_sha': 'a' * 40,
+            'repository_id': 'demo', 'github_repo': 'owner/demo', 'pull_request': 1, 'version': '1.2.3', 'source_sha': 'a' * 40, 'source_tree': 'c' * 40,
             'artifacts': [{'name': 'pkg.whl', 'sha256': digest, 'size': len(data)}]})
         self.store.put_artifact('b' * 32, 'pkg.whl', data)
         flow = WorkflowService(self.store, source=None, executor=None, tool_client=None)

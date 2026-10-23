@@ -6,7 +6,7 @@ Starting with 0.1.0, ChatTask adds reusable task templates, trusted Git snapshot
 
 - **Templates**: a built-in Python package release preflight and versioned custom templates limited to approved probe, test, build and check steps.
 - **Real execution**: an operator registers a clean Git root; a run binds HEAD. Only tracked source enters an owned Sandbox. Actual exit codes, logs, wheel/sdist hashes and independently checked cleanup are recorded.
-- **Release gate**: preflight is the default. A GitHub tag needs separate exact repository/version/SHA confirmation plus a merged PR and green checks. A verified tag still awaits independent OIDC workflow and PyPI artifact verification.
+- **Release gate**: preflight is the default. A GitHub tag needs separate confirmation bound to repository, version, source commit, source tree and text; it also requires a merged PR, exact `test` CI/workflow and equality of merged/preflight trees. A verified tag still awaits independent OIDC workflow and PyPI artifact verification.
 - **Persistent UI**: reconnect from history, cooperative cancellation, digest-checked downloads, protected tool status and auth-loss cleanup. The older Sandbox experiments remain under a primary tab.
 
 ## Run from source

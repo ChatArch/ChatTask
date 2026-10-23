@@ -41,7 +41,7 @@ chattask repository register --id demo --path /srv/managed/demo --github-repo ow
 chattask serve --env-profile site --host 127.0.0.1 --port 8000
 ```
 
-At run time the repository is checked again and HEAD is pinned. Only tracked source is archived; symlinks, submodules, private configuration and oversized archives are rejected. Dependencies install inside the Sandbox from public PyPI with finite retries and command/total deadlines, without host proxy or provider credentials. ChatLogin owns login, cookies, Origin and CSRF.
+At run time the repository is checked again and HEAD is pinned. Only tracked source is archived; symlinks, submodules, private configuration and oversized archives are rejected. Dependencies install inside the Sandbox from public PyPI by default with finite retries and command/total deadlines, without host proxy or provider credentials. When public connectivity is unreliable, a trusted operator may stage a public `deps/` tar.gz matched to the workload Python minor/architecture and set both `CHATTASK_PUBLIC_DEPS_PATH` (absolute) and `CHATTASK_PUBLIC_DEPS_SHA256` in ChatTask's typed profile. The service validates digest, size and tar members, then stages only those public dependencies inside the Sandbox. Offline project installation uses `--no-index`; missing dependencies fail honestly. ChatLogin owns login, cookies, Origin and CSRF.
 
 ## Browser flow
 

@@ -24,10 +24,10 @@ class ChatGHReleaseAdapter:
             except ImportError as exc:
                 raise ReleaseBlocked('ChatGH release dependency unavailable') from exc
             target = credential_path_from_repo(run['github_repo'])
-            token = resolve_token(None, credential_path=target, exact_only=True,
+            token = resolve_token(None, credential_path=target, exact_only=False,
                                   cwd=run.get('repository_path'))
             if not token:
-                raise ReleaseBlocked('repo-scoped ChatGH credential unavailable')
+                raise ReleaseBlocked('ChatGH repository/default credential unavailable')
             github = get_client(token, require_token=True)
             repo = github.get_repo(run['github_repo'])
         else:
@@ -59,25 +59,37 @@ class ChatGHReleaseAdapter:
             if getattr(exc, 'status', None) != 404:
                 raise
             existing = None
+        def resolved_target(ref):
+            target = ref.object
+            if target.type == 'commit':
+                return target.sha
+            if target.type == 'tag':
+                annotation = repo.get_git_tag(target.sha)
+                if annotation.object.type == 'commit':
+                    return annotation.object.sha
+            raise ReleaseBlocked('release tag has unsupported target type')
+
         if existing is not None:
-            if existing.object.sha != commit_sha:
+            if resolved_target(existing) != commit_sha:
                 raise ReleaseBlocked('release tag exists at a different target')
             return {'tag': tag, 'target_sha': commit_sha, 'tag_verified': True,
                     'publication': 'awaiting OIDC workflow and PyPI artifact verification', 'reconciled': True}
         try:
-            repo.create_git_ref(ref='refs/' + refname, sha=commit_sha)
+            annotation = repo.create_git_tag(tag, 'Release ' + run['github_repo'] + ' ' + tag,
+                                             commit_sha, 'commit')
+            repo.create_git_ref(ref='refs/' + refname, sha=annotation.sha)
         except Exception:
             # A lost response is not permission to retry an irreversible write.
             try:
                 observed = repo.get_git_ref(refname)
-                if observed.object.sha == commit_sha:
+                if resolved_target(observed) == commit_sha:
                     return {'tag': tag, 'target_sha': commit_sha, 'tag_verified': True,
                             'publication': 'awaiting OIDC workflow and PyPI artifact verification', 'reconciled': True}
             except Exception:
                 pass
             raise RuntimeError('tag write outcome unknown; inspect remote target before retry')
         observed = repo.get_git_ref(refname)
-        if observed.object.sha != commit_sha:
+        if resolved_target(observed) != commit_sha:
             raise RuntimeError('tag target verification failed')
         return {'tag': tag, 'target_sha': commit_sha, 'tag_verified': True,
                 'publication': 'awaiting OIDC workflow and PyPI artifact verification', 'reconciled': False}

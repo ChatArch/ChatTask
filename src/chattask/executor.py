@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 import hashlib
+import shlex
 import time
 from packaging.utils import parse_sdist_filename, parse_wheel_filename
 from packaging.version import Version
@@ -13,9 +14,10 @@ from opensandbox.models.filesystem import DirectoryListEntry
 
 
 class SandboxExecutor:
-    def __init__(self, task_service, *, total_seconds=520):
+    def __init__(self, task_service, *, total_seconds=520, dependency_archive: bytes | None=None):
         self.task_service = task_service
         self.total_seconds = total_seconds
+        self.dependency_archive = dependency_archive
 
     async def execute(self, run: dict, archive: bytes, on_step, cancelled, tool_client) -> dict:
         async with self.task_service.lock:
@@ -47,6 +49,10 @@ class SandboxExecutor:
                     # recorded as metadata rather than fabricated test success.
                     if receipt['exit_code'] not in (0, 1):
                         raise RuntimeError(f"pkg_probe failed with exit {receipt['exit_code']}")
+                    if receipt['exit_code'] == 1 and not any(marker in receipt['stdout'].lower() for marker in ('already exists', 'occupied')):
+                        raise RuntimeError('pkg_probe result inconclusive; inspect the tool receipt')
+                    if receipt['exit_code'] == 0 and not any(marker in receipt['stdout'].lower() for marker in ('available', 'not found')):
+                        raise RuntimeError('pkg_probe failed to establish name availability; inspect the tool receipt')
                     receipt['interpretation'] = 'available' if receipt['exit_code'] == 0 else 'occupied'
                 else:
                     if sandbox is None:
@@ -63,11 +69,19 @@ class SandboxExecutor:
                                                timeout=min(30, self._remaining()))
                         await self._command(sandbox, ['tar', '-xf', '/workspace/source.tar', '-C', '/workspace/src',
                                                       '--no-same-owner', '--no-same-permissions'], 30)
+                        if self.dependency_archive is not None:
+                            await asyncio.wait_for(sandbox.files.write_file('/workspace/public-deps.tar.gz', self.dependency_archive, mode=600),
+                                                   timeout=min(30, self._remaining()))
+                            await self._command(sandbox, ['tar', '-xzf', '/workspace/public-deps.tar.gz', '-C', '/workspace',
+                                                          '--no-same-owner', '--no-same-permissions'], 45)
                     if kind == 'test':
-                        install = await self._command(sandbox, self._pip('build', 'twine', 'pytest'), 140)
+                        install = (None if self.dependency_archive is not None else
+                                   await self._command(sandbox, self._pip('build', 'twine', 'pytest'), 140))
                         extras = run.get('install_extras', '')
-                        package = await self._command(sandbox, self._pip('.[' + extras + ']' if extras else '.'),
-                                                      140, cwd='/workspace/src')
+                        project_command = (['python','-m','pip','install','--no-input','--no-index','--no-build-isolation',
+                                            '.[' + extras + ']' if extras else '.'] if self.dependency_archive is not None
+                                           else self._pip('.[' + extras + ']' if extras else '.'))
+                        package = await self._command(sandbox, project_command, 140, cwd='/workspace/src')
                         suite = step.get('suite') or 'pytest'
                         argv = {'pytest': ['python', '-m', 'pytest', '-q'],
                                 'unittest': ['python', '-m', 'unittest', 'discover', '-v'],
@@ -80,9 +94,12 @@ class SandboxExecutor:
                                 raise RuntimeError('unittest reported no executed tests')
                         receipt = {'install_tools': install, 'install_project': package, 'test': tested, 'suite': suite}
                     elif kind == 'build':
-                        install = await self._command(sandbox, self._pip('build', 'twine'), 140)
-                        built = await self._command(sandbox, ['python', '-m', 'build', '--sdist', '--wheel',
-                                                               '--outdir', '/workspace/dist'], 130, cwd='/workspace/src')
+                        install = (None if self.dependency_archive is not None else
+                                   await self._command(sandbox, self._pip('build', 'twine'), 140))
+                        build_command = ['python', '-m', 'build', '--no-isolation', '--sdist', '--wheel',
+                                         '--outdir', '/workspace/dist'] if self.dependency_archive is not None else [
+                                         'python', '-m', 'build', '--sdist', '--wheel', '--outdir', '/workspace/dist']
+                        built = await self._command(sandbox, build_command, 130, cwd='/workspace/src')
                         artifacts = await self._read_artifacts(sandbox, run['version'])
                         receipt = {'install_tools': install, 'build': built,
                                    'artifacts': [{k: v for k, v in item.items() if k != 'data'} for item in artifacts]}
@@ -138,9 +155,11 @@ class SandboxExecutor:
         limit = min(seconds, self._remaining())
         opts = RunCommandOpts(timeout=timedelta(seconds=limit), working_directory=cwd,
                               envs={'PIP_CONFIG_FILE': '/dev/null', 'PIP_DISABLE_PIP_VERSION_CHECK': '1',
-                                    'PYTHONNOUSERSITE': '1', 'PYTHONPATH': '',
+                                    'PYTHONNOUSERSITE': '1',
+                                    'PYTHONPATH': '/workspace/deps' if self.dependency_archive is not None else '',
                                     'PATH': '/usr/local/bin:/usr/bin:/bin'})
-        output = await asyncio.wait_for(sandbox.commands.run(argv, opts=opts),
+        command=shlex.join(argv)
+        output = await asyncio.wait_for(sandbox.commands.run(command, opts=opts),
                                         timeout=min(limit + 8, self._remaining() + 2))
         receipt = self.task_service.output(output)
         if receipt['error'] or receipt['exit_code'] != 0:

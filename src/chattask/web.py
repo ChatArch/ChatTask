@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 from . import __version__
-from .settings import TaskSettings, load_settings
+from .settings import TaskSettings, load_settings, load_guest_dependencies
 from .service import TaskService
 from .auth import create_auth
 from .settings import state_paths
@@ -33,7 +33,7 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
     service = service if service is not None else TaskService(settings)
     workflow = workflow if workflow is not None else WorkflowService(
         TaskStore(state_paths(home=settings.home)['state_dir']),
-        executor=SandboxExecutor(service), tool_client=ChatPyPITools(settings.tool_profile),
+        executor=SandboxExecutor(service,dependency_archive=load_guest_dependencies(settings)), tool_client=ChatPyPITools(settings.tool_profile),
         release_adapter=ChatGHReleaseAdapter())
     @asynccontextmanager
     async def lifespan(app: FastAPI):

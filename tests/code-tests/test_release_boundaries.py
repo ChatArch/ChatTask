@@ -77,17 +77,38 @@ class ToolClientTests(unittest.TestCase):
             asyncio.run(uncertain.call('pkg_probe', {'package_name': 'demo'}, mutation=True))
 
 
+class ProbeTruthTests(unittest.TestCase):
+    def test_network_failed_probe_is_not_reported_as_occupied(self):
+        class Service:
+            lock=asyncio.Lock()
+            docker=SimpleNamespace(containers=SimpleNamespace(list=lambda **_: []))
+            async def create(self):raise AssertionError('no Sandbox should start')
+        class Tool:
+            async def call(self,*args,**kwargs):
+                return {'tool':'pkg_probe','exit_code':1,'stdout':'',
+                        'stderr':'Error: Repository query failed: timeout'}
+        updates=[]
+        async def step(value):updates.append(value)
+        run={'package_name':'fixture','version':'1.0.0','steps':[{'kind':'probe'}]}
+        result=asyncio.run(SandboxExecutor(Service()).execute(run,b'',step,lambda:False,Tool()))
+        self.assertFalse(result['ok'])
+        self.assertNotIn('occupied',str(updates))
+        self.assertEqual(updates[-1]['status'],'failed')
+        self.assertTrue(result['cleanup']['not_created'])
+
+
 class SandboxExecutorTests(unittest.TestCase):
     def test_guest_commands_deadlines_real_receipts_and_verified_cleanup(self):
         class Commands:
             def __init__(self): self.calls = []
             async def run(self, argv, *, opts):
+                assert isinstance(argv, str), 'execd v1.1.0 requires a command string'
                 self.calls.append((argv, opts))
                 return SimpleNamespace(id='guest-exec', exit_code=0, error=None,
                     logs=SimpleNamespace(stdout=[SimpleNamespace(text='guest output')], stderr=[]))
         class Files:
             async def write_file(self, path, data, **kwargs):
-                assert path == '/workspace/source.tar' and data == b'tracked archive'
+                assert (path == '/workspace/source.tar' and data == b'tracked archive') or (path == '/workspace/public-deps.tar.gz' and data == b'synthetic-public-deps')
             async def list_directory(self, entry):
                 return [SimpleNamespace(path='/workspace/dist/demo-1.2.3-py3-none-any.whl'),
                         SimpleNamespace(path='/workspace/dist/demo-1.2.3.tar.gz')]
@@ -110,7 +131,7 @@ class SandboxExecutorTests(unittest.TestCase):
                 return {'tool': name, 'exit_code': 1, 'stdout': 'occupied', 'stderr': ''}
         run = {'package_name': 'demo', 'version': '1.2.3', 'steps': [
             {'kind': 'probe'}, {'kind': 'test', 'suite': 'pytest'}, {'kind': 'build'}, {'kind': 'check'}]}
-        result = asyncio.run(SandboxExecutor(service).execute(run, b'tracked archive', update,
+        result = asyncio.run(SandboxExecutor(service, dependency_archive=b'synthetic-public-deps').execute(run, b'tracked archive', update,
                                                                lambda: False, Tool()))
         self.assertTrue(result['ok'], result)
         self.assertTrue(result['cleanup']['container_absent'])
@@ -119,6 +140,49 @@ class SandboxExecutorTests(unittest.TestCase):
         self.assertEqual([x['status'] for x in updates if x['status'] == 'passed'], ['passed'] * 4)
         self.assertTrue(all(opts.timeout.total_seconds() <= 140 for _, opts in commands.calls))
         self.assertTrue(all(opts.envs.get('PIP_CONFIG_FILE') == '/dev/null' for _, opts in commands.calls))
+        self.assertTrue(any('/workspace/public-deps.tar.gz' in cmd for cmd, _ in commands.calls))
+        self.assertFalse(any('pip install' in cmd and 'twine' in cmd for cmd, _ in commands.calls))
+
+
+class DefaultChatGHCredentialTests(unittest.TestCase):
+    def test_release_adapter_uses_approved_chatgh_default_without_repo_pin(self):
+        from unittest.mock import patch, Mock
+        from chattask.release import ChatGHReleaseAdapter, ReleaseBlocked
+        repo=Mock();repo.get_pull.return_value.merged=False
+        github=Mock();github.get_repo.return_value=repo
+        run={'pull_request':1,'github_repo':'owner/example','repository_path':'/operator/registered',
+             'default_branch':'main','source_sha':'a'*40}
+        with patch('chatgh.github.api.credential_path_from_repo',return_value=object()), \
+             patch('chatgh.github.api.resolve_token',return_value='synthetic-github-token') as token, \
+             patch('chatgh.github.api.get_client',return_value=github):
+            with self.assertRaises(ReleaseBlocked):ChatGHReleaseAdapter()._tag_sync(run)
+            self.assertFalse(token.call_args.kwargs['exact_only'])
+        repo.create_git_ref.assert_not_called()
+
+
+class AnnotatedTagReconciliationTests(unittest.TestCase):
+    def test_existing_annotated_tag_peels_to_merged_commit(self):
+        from chattask.release import ChatGHReleaseAdapter
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        source='a'*40;merged='b'*40;tag_object='c'*40
+        repo=Mock()
+        repo.get_pull.return_value=SimpleNamespace(merged=True,base=SimpleNamespace(ref='main'),
+                                                   head=SimpleNamespace(sha=source),merge_commit_sha=merged)
+        repo.get_commit.return_value.get_check_runs.return_value=[SimpleNamespace(status='completed',conclusion='success')]
+        repo.get_branch.return_value.commit.sha=merged
+        repo.compare.return_value.status='identical'
+        repo.get_contents.return_value.decoded_content=b'on:\n  push:\n    tags:\n      - "v*"\npermissions: id-token: write\nuses: pypa/gh-action-pypi-publish@release/v1'
+        repo.get_git_ref.return_value.object=SimpleNamespace(type='tag',sha=tag_object)
+        repo.get_git_tag.return_value.object=SimpleNamespace(type='commit',sha=merged)
+        provider=Mock();provider.get_repo.return_value=repo
+        run={'pull_request':2,'github_repo':'owner/example','repository_path':'/operator/registered',
+             'default_branch':'main','source_sha':source,'version':'1.2.3'}
+        outcome=ChatGHReleaseAdapter(provider=provider)._tag_sync(run)
+        self.assertTrue(outcome['reconciled'])
+        self.assertTrue(outcome['tag_verified'])
+        repo.get_git_tag.assert_called_once_with(tag_object)
+        repo.create_git_ref.assert_not_called()
 
 
 class DeadlineTests(unittest.TestCase):
@@ -159,7 +223,7 @@ class ReleaseGateTests(unittest.TestCase):
         merge_sha = 'b' * 40
         class Missing(Exception): status = 404
         class Repo:
-            def __init__(self): self.ref = None; self.writes = 0
+            def __init__(self): self.ref = None; self.writes = 0;self.git_tags={}
             def get_pull(self, number):
                 return SimpleNamespace(merged=True, base=SimpleNamespace(ref='main'),
                     head=SimpleNamespace(sha='a' * 40), merge_commit_sha=merge_sha)
@@ -171,7 +235,12 @@ class ReleaseGateTests(unittest.TestCase):
                 return SimpleNamespace(decoded_content=b'on:\n  push:\n    tags:\n      - v*\nid-token: write\npypa/gh-action-pypi-publish')
             def get_git_ref(self, name):
                 if self.ref is None: raise Missing()
-                return SimpleNamespace(object=SimpleNamespace(sha=self.ref))
+                return SimpleNamespace(object=SimpleNamespace(sha=self.ref,type='tag'))
+            def get_git_tag(self, sha):
+                return SimpleNamespace(object=SimpleNamespace(sha=self.git_tags[sha],type='commit'))
+            def create_git_tag(self, tag, message, object, type):
+                assert type=='commit';self.git_tags['c'*40]=object
+                return SimpleNamespace(sha='c'*40)
             def create_git_ref(self, *, ref, sha): self.writes += 1; self.ref = sha
         repo = Repo(); adapter = ChatGHReleaseAdapter(provider=SimpleNamespace(get_repo=lambda _: repo))
         run = {'github_repo': 'owner/demo', 'pull_request': 1, 'default_branch': 'main',

@@ -403,19 +403,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    能力地图
-    
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -427,52 +414,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="目录">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      能力分组
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      当前边界
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
-    <span class="md-ellipsis">
-      不在当前范围
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -529,41 +470,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      能力分组
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      当前边界
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
-    <span class="md-ellipsis">
-      不在当前范围
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -587,57 +493,53 @@
 
 
 <h1 id="_1">能力地图<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>这个页面用于校对 <code>ChatTask</code> 当前有哪些一等能力、哪些能力已经验证，以及哪些事情不属于当前包。</p>
-<h2 id="_2">能力分组<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<div class="grid cards">
-<ul>
-<li>
-<p><strong>命令行入口</strong></p>
-<p><code>chattask --help</code>、<code>chattask --version</code>、<code>chattask --tree</code> 和 <code>chattask --tree-brief</code> 是默认可验证入口。</p>
-</li>
-<li>
-<p><strong>Python 接口</strong></p>
-<p>实质能力应放到可 import 的 Python 函数、类或 service 层，而不是只写在 Click 回调里。</p>
-</li>
-<li>
-<p><strong>配置与环境</strong></p>
-<p>当前没有业务配置项；后续需要长期、常用、跨命令共享的配置时复用 ChatEnv。</p>
-</li>
-</ul>
-</div>
-<h2 id="_3">当前边界<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>能力</th>
-<th>状态</th>
-<th>说明</th>
+<th>当前实现</th>
+<th>边界</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>命令行基础入口</td>
-<td>已实现</td>
-<td>模板生成 Click group、<code>--version</code>、ChatStyle 共享树选项和基础测试。</td>
+<td>模板与仓库</td>
+<td>内置 Python 发布模板、自定义声明式修订、CLI 登记受信 Git 根</td>
+<td>网页不能提交路径/URL/任意宿主命令；脏源与跟踪的私密配置被拒绝</td>
 </tr>
 <tr>
-<td>ChatEnv 配置提供者</td>
-<td>未启用</td>
-<td>当前无业务配置需求，不预设配置字段。</td>
+<td>持久运行</td>
+<td>私有原子 JSON、幂等请求 ID、所有者绑定、步骤回执、重启标记</td>
+<td>同 UID 信任；中断不自动重放；不是分布式队列</td>
 </tr>
 <tr>
-<td>业务命令</td>
-<td>未实现</td>
-<td>按当前包真实需求补充，不能在模板里伪造未来命令。</td>
+<td>Sandbox 预检</td>
+<td>跟踪源码归档、真实测试/构建/Twine 检查、wheel/sdist 读回与 SHA256、销毁核验</td>
+<td>项目代码仅在 Sandbox；600 秒后端 TTL，步骤与总时限有限</td>
+</tr>
+<tr>
+<td>ChatPyPI 工具</td>
+<td>复用 PyPI 命名配置及 ChatAuth TokenStore；有限制、无重定向的异步 REST</td>
+<td>初始只调用 <code>pkg_probe</code>；退出码 1 可以是名称已占用，不是 HTTP 故障</td>
+</tr>
+<tr>
+<td>发布批准</td>
+<td>精确目标确认、预检提交/树、已合并 PR 的精确 <code>test</code> CI/CI工作流、合版树与预检树一致、默认分支/标签目标核验</td>
+<td>创建标签后只标为等待 OIDC/PyPI 验证，不声称已发布；未知写入须核对</td>
+</tr>
+<tr>
+<td>网页</td>
+<td>ChatLogin/Origin/CSRF、进度/历史/取消/摘要下载、Sandbox 实验主导航</td>
+<td>失效登录清空受保护状态；暂时失败保留过期视图提示</td>
+</tr>
+<tr>
+<td>旧 Sandbox 实验</td>
+<td>固定整数统计与持续 Shell、显式回收</td>
+<td>Shell 与登录会话不跨重启恢复</td>
 </tr>
 </tbody>
 </table>
-<h2 id="_4">不在当前范围<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<ul>
-<li>不生成计划类占位页。</li>
-<li>不把未实现能力写成用户可执行教程。</li>
-<li>不在 README、docs、issue、PR 评论或 CI log 中输出 secret、token、cookie 或 Authorization header。</li>
-</ul>
+<p>普通 Docker/runc 不等于强对抗隔离。真实部署、供应方与浏览器验收在源码测试之外。</p>
 
 
 

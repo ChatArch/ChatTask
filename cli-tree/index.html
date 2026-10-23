@@ -380,19 +380,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    CLI 树
-    
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -404,70 +391,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="目录">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      顶层命令
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      基础入口
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      业务命令槽位
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
-    <span class="md-ellipsis">
-      状态约定
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      实现合约
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -547,59 +470,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      顶层命令
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      基础入口
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      业务命令槽位
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
-    <span class="md-ellipsis">
-      状态约定
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      实现合约
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -622,58 +492,23 @@
   
 
 
-<h1 id="cli">CLI 能力地图<a class="headerlink" href="#cli" title="Permanent link">&para;</a></h1>
-<p>这篇文档是 <code>ChatTask</code> CLI 的简明能力地图，用来校对哪些命令已经是一等入口、哪些仍然只是边界或规划。生成后请按真实命令树更新；不要把未实现命令写成已可用操作。</p>
-<p>可导入 Python 函数映射见 <a href="../interface-tree/">接口树</a>。当前包能力边界见 <a href="../capability-map/">能力地图</a>。</p>
-<h2 id="_1">顶层命令<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>chattask                  # ChatTask 命令行入口
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── --help                     # 显示 CLI 帮助和已注册命令
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── --version                  # 输出当前包版本
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── --tree                     # 输出真实已注册 CLI 树和参数签名
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>└── --tree-brief               # 输出命令节点和描述，不含参数签名
+<h1 id="cli">CLI 树<a class="headerlink" href="#cli" title="Permanent link">&para;</a></h1>
+<p>以下来自候选版 <code>chattask --tree</code> 的实际注册命令。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>chattask
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── --help
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── --version
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── --tree
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── --tree-brief
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── paths [--json-output]
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── repository
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   └── register [--id REPO-ID] [--path PATH] [--github-repo GITHUB-REPO] [--default-branch DEFAULT-BRANCH] [--package-name PACKAGE-NAME]
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└── serve [--host HOST] [--port PORT] [--env-profile ENV-PROFILE]
 </code></pre></div>
-<h2 id="_2">基础入口<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>chattask --help           # 验证命令已安装，并查看当前命令树
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>chattask --version        # 验证当前安装版本
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>chattask --tree           # 回读带参数签名的真实 CLI contract
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>chattask --tree-brief     # 回读不含参数签名的简明命令树
+<p><code>--tree-brief</code> 保留命令节点与描述，但隐藏参数签名。<code>repository register</code> 是受信服务器端操作：路径必须是干净、精确的 Git 根目录；网页没有登记路径的接口。示例：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>chattask<span class="w"> </span>repository<span class="w"> </span>register<span class="w"> </span>--id<span class="w"> </span>demo<span class="w"> </span>--path<span class="w"> </span>/srv/managed/demo<span class="w"> </span>--github-repo<span class="w"> </span>owner/demo<span class="w"> </span>--package-name<span class="w"> </span>demo
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>chattask<span class="w"> </span>serve<span class="w"> </span>--env-profile<span class="w"> </span>site<span class="w"> </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
 </code></pre></div>
-<p><code>--help</code>、<code>--version</code>、<code>--tree</code> 和 <code>--tree-brief</code> 是模板默认可验证入口。两个树选项由 ChatStyle 的 <code>add_tree_option()</code> 提供；默认树保留参数签名，简明树只保留命令节点和描述。新增业务命令后，应像 ChatTea 的 CLI 树一样，把命令组单独展开，并给每个命令写一行注释。</p>
-<h2 id="_3">业务命令槽位<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>chattask &lt;group&gt;          # 按当前包真实能力命名的命令组
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── &lt;command&gt;                  # 说明这个命令做什么
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>└── &lt;command&gt;                  # 说明状态、边界或 checkpoint
-</code></pre></div>
-<p>这里是占位槽位，不是未来能力承诺。只有当命令、Python 函数和测试都存在时，才把它写成已实现入口。</p>
-<h2 id="_4">状态约定<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>状态</th>
-<th>含义</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>已实现</td>
-<td>命令、函数和测试已经存在</td>
-</tr>
-<tr>
-<td>已验证</td>
-<td>已通过 CI、本地 smoke 或真实服务实践</td>
-</tr>
-<tr>
-<td>规划 / checkpoint</td>
-<td>只保留边界说明；实现前不要写操作教程</td>
-</tr>
-</tbody>
-</table>
-<h2 id="_5">实现合约<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
-<ul>
-<li>每个已实现命令都要能追到 Python 函数、类或 service 层。</li>
-<li>如果命令会写远端状态，文档必须说明凭据、权限、dry-run/checkpoint 或确认边界。</li>
-<li>新增命令时，同步更新 README、接口树、能力地图、测试和相关 Flow 页面。</li>
-</ul>
+<p><code>paths</code>只解析 <code>$CHATARCH_HOME/chattask</code> 等目录，不创建它们。<code>serve</code> 显式构造服务，Web 生命周期负责中断恢复标记与原有会话清理；CLI 不做发布或基础设施安装。</p>
 
 
 

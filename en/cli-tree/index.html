@@ -64,7 +64,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#cli-capability-map" class="md-skip">
+        <a href="#cli-tree" class="md-skip">
           Skip to content
         </a>
       
@@ -380,19 +380,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    CLI Tree
-    
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -404,70 +391,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#top-level-commands" class="md-nav__link">
-    <span class="md-ellipsis">
-      Top-Level Commands
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#base-entries" class="md-nav__link">
-    <span class="md-ellipsis">
-      Base Entries
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#business-command-slots" class="md-nav__link">
-    <span class="md-ellipsis">
-      Business Command Slots
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#status-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      Status Contract
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#implementation-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      Implementation Contract
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -547,59 +470,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#top-level-commands" class="md-nav__link">
-    <span class="md-ellipsis">
-      Top-Level Commands
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#base-entries" class="md-nav__link">
-    <span class="md-ellipsis">
-      Base Entries
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#business-command-slots" class="md-nav__link">
-    <span class="md-ellipsis">
-      Business Command Slots
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#status-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      Status Contract
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#implementation-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      Implementation Contract
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -622,58 +492,23 @@
   
 
 
-<h1 id="cli-capability-map">CLI Capability Map<a class="headerlink" href="#cli-capability-map" title="Permanent link">&para;</a></h1>
-<p>This page is the compact capability map for the <code>ChatTask</code> CLI. Use it to review which commands are first-class entries and which are still boundary or planned slots. After scaffolding, update it with the real command tree; do not present unimplemented commands as available operations.</p>
-<p>Importable Python functions are mapped in <a href="../interface-tree/">Interface Tree</a>. Current package boundaries are tracked in <a href="../capability-map/">Capability Map</a>.</p>
-<h2 id="top-level-commands">Top-Level Commands<a class="headerlink" href="#top-level-commands" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>chattask                  # ChatTask command-line entry
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── --help                     # Show CLI help and registered commands
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── --version                  # Print the current package version
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── --tree                     # Print the registered CLI tree with parameter signatures
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>└── --tree-brief               # Print command nodes and descriptions without signatures
+<h1 id="cli-tree">CLI tree<a class="headerlink" href="#cli-tree" title="Permanent link">&para;</a></h1>
+<p>These are the registered commands observed with <code>chattask --tree</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>chattask
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── --help
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── --version
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── --tree
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── --tree-brief
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── paths [--json-output]
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── repository
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   └── register [--id REPO-ID] [--path PATH] [--github-repo GITHUB-REPO] [--default-branch DEFAULT-BRANCH] [--package-name PACKAGE-NAME]
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└── serve [--host HOST] [--port PORT] [--env-profile ENV-PROFILE]
 </code></pre></div>
-<h2 id="base-entries">Base Entries<a class="headerlink" href="#base-entries" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>chattask --help           # Verify the command is installed and inspect the current command tree
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>chattask --version        # Verify the installed version
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>chattask --tree           # Read back the CLI contract with parameter signatures
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>chattask --tree-brief     # Read back command nodes and descriptions only
+<p><code>--tree-brief</code> preserves command nodes and descriptions without signatures. <code>repository register</code> is trusted server-side administration: the path must be an exact clean Git root; the browser has no path-registration endpoint. Example:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>chattask<span class="w"> </span>repository<span class="w"> </span>register<span class="w"> </span>--id<span class="w"> </span>demo<span class="w"> </span>--path<span class="w"> </span>/srv/managed/demo<span class="w"> </span>--github-repo<span class="w"> </span>owner/demo<span class="w"> </span>--package-name<span class="w"> </span>demo
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>chattask<span class="w"> </span>serve<span class="w"> </span>--env-profile<span class="w"> </span>site<span class="w"> </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
 </code></pre></div>
-<p><code>--help</code>, <code>--version</code>, <code>--tree</code>, and <code>--tree-brief</code> are the scaffolded verification entries. ChatStyle's <code>add_tree_option()</code> provides both tree flags: the default tree keeps parameter signatures, while the brief tree keeps only command nodes and descriptions. After adding business commands, follow the ChatTea CLI tree pattern: split command groups into their own sections and annotate every command line.</p>
-<h2 id="business-command-slots">Business Command Slots<a class="headerlink" href="#business-command-slots" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>chattask &lt;group&gt;          # Command group named after real package capability
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── &lt;command&gt;                  # Explain what this command does
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>└── &lt;command&gt;                  # Explain status, boundary, or checkpoint behavior
-</code></pre></div>
-<p>This is a structural placeholder, not a promise of future capability. Only document a command as implemented after the command, Python function, and tests exist.</p>
-<h2 id="status-contract">Status Contract<a class="headerlink" href="#status-contract" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Status</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Implemented</td>
-<td>Command, function, and tests exist</td>
-</tr>
-<tr>
-<td>Verified</td>
-<td>Covered by CI, local smoke, or real-service practice</td>
-</tr>
-<tr>
-<td>Planned / checkpoint</td>
-<td>Keep only boundary notes; do not write operation tutorials before implementation</td>
-</tr>
-</tbody>
-</table>
-<h2 id="implementation-contract">Implementation Contract<a class="headerlink" href="#implementation-contract" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Every implemented command must map back to a Python function, class, or service layer.</li>
-<li>If a command writes remote state, document credentials, permissions, dry-run/checkpoint behavior, or confirmation boundaries.</li>
-<li>When adding a command, update README, the interface tree, capability map, tests, and related flow pages together.</li>
-</ul>
+<p><code>paths</code> only resolves <code>$CHATARCH_HOME/chattask</code> and related paths. <code>serve</code> explicitly constructs the service; the Web lifespan marks interrupted work and cleans up older sessions. The CLI neither publishes nor installs infrastructure.</p>
 
 
 

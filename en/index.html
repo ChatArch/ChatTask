@@ -62,7 +62,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#chattask-docs" class="md-skip">
+        <a href="#chattask-integration" class="md-skip">
           Skip to content
         </a>
       
@@ -349,45 +349,36 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#choose-documentation-by-scenario" class="md-nav__link">
+  <a href="#architecture-and-prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
-      Choose Documentation by Scenario
+      Architecture and prerequisites
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#documentation-organization" class="md-nav__link">
+  <a href="#candidate-setup" class="md-nav__link">
     <span class="md-ellipsis">
-      Documentation Organization
+      Candidate setup
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#primary-entry-points" class="md-nav__link">
+  <a href="#browser-flow" class="md-nav__link">
     <span class="md-ellipsis">
-      Primary Entry Points
+      Browser flow
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#documentation-status" class="md-nav__link">
+  <a href="#http-contract" class="md-nav__link">
     <span class="md-ellipsis">
-      Documentation Status
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#local-preview" class="md-nav__link">
-    <span class="md-ellipsis">
-      Local Preview
+      HTTP contract
     </span>
   </a>
   
@@ -549,45 +540,36 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#choose-documentation-by-scenario" class="md-nav__link">
+  <a href="#architecture-and-prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
-      Choose Documentation by Scenario
+      Architecture and prerequisites
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#documentation-organization" class="md-nav__link">
+  <a href="#candidate-setup" class="md-nav__link">
     <span class="md-ellipsis">
-      Documentation Organization
+      Candidate setup
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#primary-entry-points" class="md-nav__link">
+  <a href="#browser-flow" class="md-nav__link">
     <span class="md-ellipsis">
-      Primary Entry Points
+      Browser flow
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#documentation-status" class="md-nav__link">
+  <a href="#http-contract" class="md-nav__link">
     <span class="md-ellipsis">
-      Documentation Status
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#local-preview" class="md-nav__link">
-    <span class="md-ellipsis">
-      Local Preview
+      HTTP contract
     </span>
   </a>
   
@@ -617,70 +599,101 @@
   
 
 
-<h1 id="chattask-docs">ChatTask Docs<a class="headerlink" href="#chattask-docs" title="Permanent link">&para;</a></h1>
-<p>ChatTask is a ChatArch Python package. This documentation site should hold long-lived usage notes, a command map, a capability map, and Python interface entry points. After scaffolding, replace placeholders with behavior that is actually implemented, explored, or planned for this package.</p>
-<p>Site entry: <a href="https://arch.gh.wzhecnu.cn/ChatTask/en/">https://arch.gh.wzhecnu.cn/ChatTask/en/</a></p>
-<h2 id="choose-documentation-by-scenario">Choose Documentation by Scenario<a class="headerlink" href="#choose-documentation-by-scenario" title="Permanent link">&para;</a></h2>
+<h1 id="chattask-integration">ChatTask integration<a class="headerlink" href="#chattask-integration" title="Permanent link">&para;</a></h1>
+<p>These template capabilities start in ChatTask 0.1.0; historical PyPI 0.0.2 is only a CLI scaffold. Check the actual PyPI version before installing. The older integer-statistics task and persistent Shell experiment remain in the primary navigation.</p>
+<h2 id="architecture-and-prerequisites">Architecture and prerequisites<a class="headerlink" href="#architecture-and-prerequisites" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Authenticated Web → ChatTask templates/private runs → ChatPyPI metadata tool
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                                           └→ OpenSandbox → tracked-source test/build/check
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Exact approval → ChatGH/GitHub merged PR and checks → tag → existing OIDC publish workflow
+</code></pre></div>
+<p>Provide an existing OpenSandbox control plane and Docker access, a fixed site account, a published ChatPyPI service, a native ChatAuth access token and an existing PyPI ChatEnv named profile. The operator owns installation, deployment, token issue and renewal. ChatTask does not provision them. Each Sandbox remains bounded by the 600-second backend TTL, 1 CPU, 512 MiB, 128 PIDs, loopback ports and no host mounts. Project build/test code runs only inside it.</p>
+<h2 id="candidate-setup">Candidate setup<a class="headerlink" href="#candidate-setup" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s1">'.[web]'</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>chattask<span class="w"> </span>--tree
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>chattask<span class="w"> </span>paths<span class="w"> </span>--json-output
+</code></pre></div>
+<p>Create a ChatTask ChatEnv named profile such as <code>site</code> with actual values corresponding to these placeholders:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>CHATTASK_SANDBOX_ENDPOINT=http://127.0.0.1:8080
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>CHATTASK_SANDBOX_API_KEY=&lt;existing-control-plane-key&gt;
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>CHATTASK_IMAGE=python:3.10-slim
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>CHATTASK_WEB_ORIGIN=https://task.example.test
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>CHATTASK_LOGIN_USERNAME=&lt;site-account&gt;
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>CHATTASK_LOGIN_PASSWORD=&lt;site-password&gt;
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>CHATTASK_TOOL_PROFILE=task-tools
+</code></pre></div>
+<p><code>CHATTASK_TOOL_PROFILE</code> is only a pointer to an existing PyPI named profile. ChatPyPI's <code>load_pypi_env_profile</code> reads that PyPI ChatEnv profile, which should contain <code>CHATPYPI_MODE=service</code>, <code>CHATPYPI_BASE_URL=http://127.0.0.1:10255</code> and <code>CHATPYPI_AUTH_PROFILE=task-pypi</code>. ChatTask does not duplicate service URL or token fields. At invocation it reads the native <code>TokenStore().read('ChatAuth', profile)</code> access token. The initial service permits metadata probes only, not ChatPyPI package upload. Example values are placeholders and do not belong in source or logs.</p>
+<p>An operator registers an exact clean trusted Git root. The browser has no path/URL registration route:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>chattask<span class="w"> </span>repository<span class="w"> </span>register<span class="w"> </span>--id<span class="w"> </span>demo<span class="w"> </span>--path<span class="w"> </span>/srv/managed/demo<span class="w"> </span>--github-repo<span class="w"> </span>owner/demo<span class="w"> </span>--default-branch<span class="w"> </span>main<span class="w"> </span>--package-name<span class="w"> </span>demo
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>chattask<span class="w"> </span>serve<span class="w"> </span>--env-profile<span class="w"> </span>site<span class="w"> </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
+</code></pre></div>
+<p>At run time the repository is checked again and HEAD/tree are pinned. Only tracked source is archived; the archive is rebuilt directly from pinned Git blobs so <code>export-ignore</code>/<code>export-subst</code> cannot change the tested source. Symlinks, submodules, private configuration and oversized archives are rejected. Dependencies install inside the Sandbox from public PyPI by default with finite retries and command/total deadlines, without host proxy or provider credentials. When public connectivity is unreliable, a trusted operator may stage a public <code>deps/</code> tar.gz matched to the workload Python minor/architecture and set both <code>CHATTASK_PUBLIC_DEPS_PATH</code> (absolute) and <code>CHATTASK_PUBLIC_DEPS_SHA256</code> in ChatTask's typed profile. The service validates digest, size and tar members, then stages only those public dependencies inside the Sandbox. Offline project installation uses <code>--no-index</code>; missing dependencies fail honestly. ChatLogin owns login, cookies, Origin and CSRF.</p>
+<h2 id="browser-flow">Browser flow<a class="headerlink" href="#browser-flow" title="Permanent link">&para;</a></h2>
+<p>Select a template, repository and target version; optionally provide test extras (such as <code>web,dev</code>) and a merged PR number, then create a preflight. <strong>Preflight is the default.</strong> The built-in template executes <code>pkg_probe</code>, tests, wheel/sdist build and Twine check. Probe exit 1 can mean an occupied name; its actual receipt is shown. Real exit codes/logs, artifact sizes/SHA256, Sandbox ID and cleanup evidence are persisted. Refresh reconnects from history; disconnect does not cancel. Cancellation is cooperative at step boundaries and only becomes “cancelled” after verified cleanup.</p>
+<p>Custom templates can select declarative steps, test suite and description, then save a new revision. They cannot submit arbitrary host commands. Only a run with passed tests, build, check and two real artifacts can reach release approval. Approval requires manually typing the exact <code>TAG owner/demo v1.2.3</code> confirmation and binds repository, version, source commit, source tree and PR. The backend verifies the merged PR source tree, exact <code>test</code> CI/CI workflow, equality of merged/preflight trees, default branch and tag target. Ambiguous writes reconcile by stable tag target; a verified tag remains <code>awaiting_publication</code> until OIDC workflow/PyPI artifact verification, never merely “published”.</p>
+<h2 id="http-contract">HTTP contract<a class="headerlink" href="#http-contract" title="Permanent link">&para;</a></h2>
+<p>Private <code>/api/*</code> routes require login; writes additionally require same-origin Origin and <code>X-CSRF-Token</code>. <code>GET /health</code> only identifies the HTTP package and liveness.</p>
 <table>
 <thead>
 <tr>
-<th>Scenario</th>
-<th>Document</th>
+<th>Method</th>
+<th>Path</th>
+<th>Purpose</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Install the package, run the CLI, and confirm it works</td>
-<td><a href="cli-tree/">CLI Tree</a></td>
+<td>GET / POST</td>
+<td><code>/api/templates</code></td>
+<td>List or create declarative templates</td>
 </tr>
 <tr>
-<td>Check first-class capabilities and current boundaries</td>
-<td><a href="capability-map/">Capability Map</a></td>
+<td>PUT</td>
+<td><code>/api/templates/{id}</code></td>
+<td>Save a new revision without changing bound runs</td>
 </tr>
 <tr>
-<td>Call package behavior directly from Python</td>
-<td><a href="interface-tree/">Python Interface Tree</a></td>
+<td>GET</td>
+<td><code>/api/templates/{id}/revisions[/{revision}]</code></td>
+<td>Read immutable past revisions</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/repositories</code></td>
+<td>List registered IDs and public metadata, without host paths</td>
+</tr>
+<tr>
+<td>POST / GET</td>
+<td><code>/api/runs</code></td>
+<td>Idempotent preflight create with stable <code>request_id</code> / own history</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/runs/{id}</code></td>
+<td>Own run, steps, cleanup and release state</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/runs/{id}/cancel</code></td>
+<td>Request cooperative cancellation</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/runs/{id}/approve</code></td>
+<td>Approve exact tag creation target</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/runs/{id}/artifacts/{name}</code></td>
+<td>Digest-checked binary download</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/tool-connections/status</code></td>
+<td>Redacted connection availability</td>
 </tr>
 </tbody>
 </table>
-<h2 id="documentation-organization">Documentation Organization<a class="headerlink" href="#documentation-organization" title="Permanent link">&para;</a></h2>
-<p>This template keeps only durable documentation entry points; it does not generate a plan placeholder:</p>
-<ul>
-<li><strong>CLI tree</strong>: the most direct command entry point, including the real command tree, status, and update checklist.</li>
-<li><strong>Capability map</strong>: first-class capabilities, boundaries, and out-of-scope areas.</li>
-<li><strong>Interface tree</strong>: importable Python APIs behind the CLI.</li>
-</ul>
-<h2 id="primary-entry-points">Primary Entry Points<a class="headerlink" href="#primary-entry-points" title="Permanent link">&para;</a></h2>
-<div class="grid cards">
-<ul>
-<li>
-<p><strong>CLI Tree</strong></p>
-<p>Start from the CLI entry point and record implemented commands, command status, and interactive conventions.</p>
-<p><a href="cli-tree/">Open CLI Tree</a></p>
-</li>
-<li>
-<p><strong>Capability Map</strong></p>
-<p>Review current package boundaries and avoid presenting planned work as implemented behavior.</p>
-<p><a href="capability-map/">Open Capability Map</a></p>
-</li>
-<li>
-<p><strong>Python Interface Tree</strong></p>
-<p>Keep the CLI thin and put substantive behavior in importable Python APIs.</p>
-<p><a href="interface-tree/">Open Interface Tree</a></p>
-</li>
-</ul>
-</div>
-<h2 id="documentation-status">Documentation Status<a class="headerlink" href="#documentation-status" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>Implemented</strong>: code, tests, or CLI routes exist.</li>
-<li><strong>Verified</strong>: covered by local smoke, CI, or real-service practice.</li>
-<li><strong>Not implemented</strong>: keep as boundary and planning notes only; turn into operation docs after implementation and validation.</li>
-</ul>
-<h2 id="local-preview">Local Preview<a class="headerlink" href="#local-preview" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">".[docs]"</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>mkdocs<span class="w"> </span>serve
-</code></pre></div>
-<p>The Chinese home page is available at <a href="https://arch.gh.wzhecnu.cn/ChatTask/">https://arch.gh.wzhecnu.cn/ChatTask/</a>. Topic pages without English translations fall back to the default Chinese content through the i18n plugin.</p>
+<p>Older <code>/api/tasks</code> and <code>/api/sessions</code> remain. Runs use same-UID private directories and atomic JSON/artifact files under <code>$CHATARCH_HOME/chattask</code>; this is not a multi-tenant database. Restart marks unfinished or in-flight writes interrupted and requires manual reconciliation of the real Sandbox or remote target; it never replays uncertain writes. Login sessions and persistent Shell do not survive restart.</p>
 
 
 

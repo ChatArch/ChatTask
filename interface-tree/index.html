@@ -490,15 +490,31 @@
   
 
 
-<h1 id="python">Python 接口树<a class="headerlink" href="#python" title="Permanent link">&para;</a></h1>
-<p>当前版本只包含包身份和命令行骨架，尚无业务接口。</p>
+<h1 id="python">Python 接口<a class="headerlink" href="#python" title="Permanent link">&para;</a></h1>
+<p>CLI 和 Web 复用可导入的业务层；导入 <code>chattask</code> 本身不连接 Docker、读取令牌、建目录或启动服务。</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>chattask
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── __init__.py  # __version__
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>└── cli.py       # Click main 入口
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── TaskSettings / settings.load_settings(profile=..., home=...)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── TaskService                    # 旧整数 Task 与持续 Shell
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│   ├── once(values)
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   ├── open_session() / run_session(id, command) / close_session(id)
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│   └── sweep() / shutdown()
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── TaskStore(root)                # 私有原子模板/仓库/运行/产物存储
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>├── WorkflowService(store, source=..., executor=..., tool_client=..., release_adapter=...)
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│   ├── templates() / save_template(spec, update=False)
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│   ├── register_repository(id, path, github_repo, default_branch, package_name)
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│   ├── create_run(owner, body) / get_run(owner, id) / list_runs(owner)
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│   ├── cancel(owner, id) / approve(owner, id, exact_body) / artifact(owner, id, name)
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│   └── recover() / shutdown()
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>├── source.GitSource               # 干净 Git 根/跟踪归档/固定 SHA
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>├── executor.SandboxExecutor       # OpenSandbox 真执行与独立清理核验
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>├── tool_client.ChatPyPITools      # PyPI 命名 profile / ChatAuth TokenStore / REST
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>├── release.ChatGHReleaseAdapter   # 已合并 PR、检查、标签写入/核对
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>├── create_app(settings, service=..., workflow=...)
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>└── state_paths(home=...)
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">chattask</span><span class="w"> </span><span class="kn">import</span> <span class="n">__version__</span>
-</code></pre></div>
-<p>后续业务能力应提供可导入的 Python 函数或类，再由 CLI 调用。</p>
+<p><code>WorkflowService.create_run</code> 接受 <code>request_id</code>、<code>repository_id</code>、<code>template_id</code>、<code>version</code>，以及可选 <code>install_extras</code>（最多四个简单名称）和 <code>pull_request</code>。认证所有者由 Web 服务端传入；浏览器不能指定所有者或宿主路径。内置模板 ID 是 <code>python-release</code>。自定义模板允许的步骤为 <code>probe</code>、<code>test</code>（<code>pytest</code> / <code>unittest</code> / <code>compileall</code>）、<code>build</code>、<code>check</code>；<code>check</code> 必须在 <code>build</code> 后。修订后已创建运行仍绑定旧步骤快照。</p>
+<p><code>approve</code> 只接受运行处于 <code>awaiting_approval</code> 时的精确字典：<code>action=tag</code>、同一 <code>repository_id</code>、<code>version</code>、<code>source_sha</code>、<code>source_tree</code>、<code>confirmation=TAG owner/repo vVERSION</code>。后端要求已合并 PR 的源码树等于预检树、精确 <code>test</code> CI/CI工作流通过，并要求合版树仍等于预检树。结果可能是 <code>blocked</code>、<code>release_unknown</code> 或 <code>awaiting_publication</code>，后者不代表包已发布。产物下载会再次核对字节大小和 SHA256。</p>
+<p>Web lifespan负责恢复标记和显式关闭。直接使用 Python 长期会话或工作流的调用方也应管理这两个方法。所有生产依赖连接在显式构造/调用后才发生；源码离线测试使用注入的合成客户端与临时存储。</p>
 
 
 

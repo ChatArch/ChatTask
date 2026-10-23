@@ -403,19 +403,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    Capability Map
-    
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -427,52 +414,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#capability-groups" class="md-nav__link">
-    <span class="md-ellipsis">
-      Capability Groups
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#current-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      Current Boundary
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#out-of-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      Out of Scope
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -529,41 +470,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#capability-groups" class="md-nav__link">
-    <span class="md-ellipsis">
-      Capability Groups
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#current-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      Current Boundary
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#out-of-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      Out of Scope
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -586,58 +492,54 @@
   
 
 
-<h1 id="capability-map">Capability Map<a class="headerlink" href="#capability-map" title="Permanent link">&para;</a></h1>
-<p>Use this page to check which first-class capabilities <code>ChatTask</code> currently owns, which ones are verified, and what remains out of scope for this package.</p>
-<h2 id="capability-groups">Capability Groups<a class="headerlink" href="#capability-groups" title="Permanent link">&para;</a></h2>
-<div class="grid cards">
-<ul>
-<li>
-<p><strong>CLI Entry</strong></p>
-<p><code>chattask --help</code>, <code>chattask --version</code>, <code>chattask --tree</code>, and <code>chattask --tree-brief</code> are the default verification entry points.</p>
-</li>
-<li>
-<p><strong>Python API</strong></p>
-<p>Substantive behavior should live in importable Python functions, classes, or service layers rather than only in Click callbacks.</p>
-</li>
-<li>
-<p><strong>Config and Environment</strong></p>
-<p>There is no domain configuration yet. Reuse ChatEnv for stable, shared settings when needed.</p>
-</li>
-</ul>
-</div>
-<h2 id="current-boundary">Current Boundary<a class="headerlink" href="#current-boundary" title="Permanent link">&para;</a></h2>
+<h1 id="capability-map">Capability map<a class="headerlink" href="#capability-map" title="Permanent link">&para;</a></h1>
 <table>
 <thead>
 <tr>
 <th>Capability</th>
-<th>Status</th>
-<th>Notes</th>
+<th>Implementation</th>
+<th>Boundary</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>CLI base entry</td>
-<td>Implemented</td>
-<td>The template generates a Click group, <code>--version</code>, shared ChatStyle tree options, and base tests.</td>
+<td>Templates and repositories</td>
+<td>Built-in Python release template, declarative custom revisions, trusted Git roots registered by CLI</td>
+<td>Browser cannot submit paths, URLs or host commands; dirty source and tracked private configuration are rejected</td>
 </tr>
 <tr>
-<td>ChatEnv provider</td>
-<td>Not enabled</td>
-<td>No domain configuration or placeholder credential fields are needed yet.</td>
+<td>Durable runs</td>
+<td>Private atomic JSON, idempotent request IDs, owner binding, step receipts and restart marking</td>
+<td>Same-UID trust; no replay of interrupted work; not a distributed queue</td>
 </tr>
 <tr>
-<td>Business commands</td>
-<td>Not implemented</td>
-<td>Add these from the real package domain; do not fake future commands in the template.</td>
+<td>Sandbox preflight</td>
+<td>Tracked archive, real tests/build/Twine check, wheel/sdist readback and SHA256, verified destruction</td>
+<td>Project code runs only in Sandbox; backend TTL 600 seconds with bounded commands and total time</td>
+</tr>
+<tr>
+<td>ChatPyPI tools</td>
+<td>Existing PyPI named configuration and ChatAuth TokenStore; bounded non-redirecting async REST</td>
+<td>Initial approved tool is <code>pkg_probe</code>; exit 1 can mean an occupied name, not an HTTP failure</td>
+</tr>
+<tr>
+<td>Release approval</td>
+<td>Exact target confirmation, preflight commit/tree, merged PR exact <code>test</code> CI/CI workflow, equality of merged/preflight trees, default branch and tag-target verification</td>
+<td>A tag awaits OIDC/PyPI verification and is never labelled published; uncertain writes require reconciliation</td>
+</tr>
+<tr>
+<td>Web</td>
+<td>ChatLogin/Origin/CSRF, progress/history/cancel/digest downloads, Sandbox experiment tab</td>
+<td>Auth loss clears private state; transient errors show a stale-view warning</td>
+</tr>
+<tr>
+<td>Existing experiments</td>
+<td>Fixed integer statistics and persistent Shell with explicit cleanup</td>
+<td>Shell and login sessions do not survive restart</td>
 </tr>
 </tbody>
 </table>
-<h2 id="out-of-scope">Out of Scope<a class="headerlink" href="#out-of-scope" title="Permanent link">&para;</a></h2>
-<ul>
-<li>No plan placeholder page is generated.</li>
-<li>No unimplemented capability should be written as a user operation tutorial.</li>
-<li>No secret, token, cookie, or Authorization header should appear in README, docs, issues, PR comments, or CI logs.</li>
-</ul>
+<p>Ordinary Docker/runc is not strong hostile-code isolation. Deployed provider and browser acceptance is separate from source tests.</p>
 
 
 

@@ -204,7 +204,7 @@ async function initializeTemplates() {
     if (!repositories.length) show('create-state', '尚无受信仓库。请管理员在服务器 CLI 中登记干净的 Git 根目录。', true);
     deployTemplateControls();
     const connection = await request('/api/tool-connections/status');
-    show('tool-state', connection.available ? `ChatPyPI 工具可用：${(connection.tools || []).join(', ')}` :
+    show('tool-state', connection.available ? `ChatPyPI 元数据工具已连接：${(connection.tools || []).join(', ')}。正式发版仍需 PR/CI 与单独批准；此连接没有 PyPI 上传权限。` :
       `ChatPyPI 工具尚不可用：${connection.reason || '连接未就绪'}`, !connection.available);
   } catch (error) {
     show('create-state', `模板资料暂不可用：${error.message}。现有画面可能已过期。`, true);

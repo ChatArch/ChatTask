@@ -1,6 +1,7 @@
 """Bounded ChatPyPI service client; credentials stay in dependency-owned stores."""
 from __future__ import annotations
 
+import asyncio
 import httpx
 from urllib.parse import urlsplit
 
@@ -90,10 +91,23 @@ class ChatPyPITools:
             raise ValueError('pkg_probe requires a package_name')
         if 'package_name' not in schema.get('properties', {}):
             raise ToolTransportError('ChatPyPI tool schema is unexpected')
-        payload = await self._request('POST', path, arguments, mutation=mutation)
+        payload = None
+        for attempt in range(1, 4 if not mutation else 2):
+            try:
+                payload = await self._request('POST', path, arguments, mutation=mutation)
+            except ToolTransportError:
+                if mutation or attempt == 3:
+                    raise
+                await asyncio.sleep(.2 * attempt)
+                continue
+            if mutation or not (payload.get('exit_code') == 1 and not payload.get('stdout') and
+                                'Repository query failed' in str(payload.get('stderr', ''))):
+                break
+            if attempt < 3:
+                await asyncio.sleep(.2 * attempt)
         if not isinstance(payload, dict) or payload.get('tool') != name or type(payload.get('exit_code')) is not int:
             raise ToolTransportError('ChatPyPI tool result schema invalid')
-        return {'tool': name, 'exit_code': payload['exit_code'],
+        return {'tool': name, 'exit_code': payload['exit_code'], 'read_attempts': attempt,
                 'stdout': str(payload.get('stdout') or '')[:4096],
                 'stderr': str(payload.get('stderr') or '')[:4096]}
 

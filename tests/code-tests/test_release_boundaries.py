@@ -44,6 +44,26 @@ class GitSourceTests(unittest.TestCase):
 
 
 class ToolClientTests(unittest.TestCase):
+    def test_bounded_read_only_probe_retries_query_error(self):
+        calls=[]
+        def handler(request):
+            calls.append(request.url.path)
+            if request.url.path=='/api/tools':
+                return httpx.Response(200,json=[{'name':'pkg_probe','route':'/api/pkg/probe',
+                    'input_schema':{'properties':{'package_name':{'type':'string'}},'required':['package_name']}}])
+            if calls.count('/api/pkg/probe')==1:
+                return httpx.Response(200,json={'tool':'pkg_probe','exit_code':1,'stdout':'',
+                    'stderr':'Error: Repository query failed for pypi: timeout'})
+            return httpx.Response(200,json={'tool':'pkg_probe','exit_code':1,
+                'stdout':'[FAIL] package name: demo already exists on pypi','stderr':''})
+        client=ChatPyPITools(profile_loader=lambda _: {'CHATPYPI_MODE':'service',
+            'CHATPYPI_BASE_URL':'http://127.0.0.1:10255','CHATPYPI_AUTH_PROFILE':'task-pypi'},
+            token_reader=lambda _: 'synthetic',transport=httpx.MockTransport(handler))
+        receipt=asyncio.run(client.call('pkg_probe',{'package_name':'demo'}))
+        self.assertEqual(receipt['exit_code'],1)
+        self.assertEqual(receipt['read_attempts'],2)
+        self.assertEqual(calls.count('/api/pkg/probe'),2)
+
     def test_probe_exit_is_distinct_from_http_failure_and_credentials_are_redacted(self):
         requests = []
         def handler(request):

@@ -44,7 +44,7 @@ class SandboxExecutor:
                         raise RuntimeError('ChatPyPI tool connection unavailable')
                     receipt = await asyncio.wait_for(
                         tool_client.call('pkg_probe', {'package_name': run['package_name']}, mutation=False),
-                        timeout=min(15, self._remaining()))
+                        timeout=min(45, self._remaining()))
                     # pkg_probe exit 1 means an occupied distribution name; it is
                     # recorded as metadata rather than fabricated test success.
                     if receipt['exit_code'] not in (0, 1):

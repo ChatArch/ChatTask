@@ -629,7 +629,7 @@
 <p>仓库运行时再次检查干净状态，并绑定 HEAD。只归档跟踪源码；拒绝符号链接、子模块、私密配置和超出大小上限的归档。安装依赖发生于 Sandbox 内，默认只使用公共 PyPI，设置有限重试、命令与总时限；不传递宿主代理或供应方凭据。网络不稳定时，可由可信操作员提供与工作负载Python小版本和架构匹配的公共依赖 <code>deps/</code> tar.gz 归档：在ChatTask profile同时设置 <code>CHATTASK_PUBLIC_DEPS_PATH</code>（绝对路径）与 <code>CHATTASK_PUBLIC_DEPS_SHA256</code>。启动时会核对摘要/大小和成员安全，仅把公开依赖送入Sandbox；此模式项目安装使用 <code>--no-index</code>，缺依赖会失败，不会误报测试成功。登录、Cookie、Origin 和 CSRF 由 ChatLogin 处理。</p>
 <h2 id="_3">网页流程<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <p>选择模板、仓库、目标版本；可选填测试 extras（如 <code>web,dev</code>）和已合并 PR 编号，然后点击“创建并执行预检”。默认<strong>只预检</strong>。内置模板依次进行 <code>pkg_probe</code>、测试、wheel/sdist 构建、Twine 检查；探测退出码 1 可代表名称已占用，仍显示真实回执。每一步的退出码和日志、产物大小与 SHA256、Sandbox ID/清理证据会保存在私有运行记录中。刷新页面可从历史重连；浏览器断开不会取消运行。取消请求在步骤边界生效，且清理核验后才显示“已取消”。</p>
-<p>自定义模板可从内置模板选取声明式步骤、测试方式和说明并保存新修订，不接受任意宿主命令。只有通过测试、构建、检查并产生两个真实产物的运行可以进入发布批准。批准页要求手工输入准确的 <code>TAG owner/demo v1.2.3</code> 形式的确认文字，并核对绑定的仓库、版本、源码 SHA 与 PR。后端再次验证已合并 PR、精确 HEAD 检查、默认分支和标签目标。写入不确定时先查询稳定标签目标，绝不盲目重试。已核验的标签仍标记为“等待 OIDC 工作流和 PyPI 产物验证”，不会被称为已发布。</p>
+<p>自定义模板可从内置模板选取声明式步骤、测试方式和说明并保存新修订，不接受任意宿主命令。只有通过测试、构建、检查并产生两个真实产物的运行可以进入发布批准。批准页要求手工输入准确的 <code>TAG owner/demo v1.2.3</code> 形式的确认文字，并核对绑定的仓库、版本、源码提交、源码树与 PR。后端再次验证已合并 PR 的源码树、精确 <code>test</code> CI/CI工作流、合版树与预检树一致、默认分支和标签目标。写入不确定时先查询稳定标签目标，绝不盲目重试。已核验的标签仍标记为“等待 OIDC 工作流和 PyPI 产物验证”，不会被称为已发布。</p>
 <h2 id="http">HTTP 合约<a class="headerlink" href="#http" title="Permanent link">&para;</a></h2>
 <p>私有 <code>/api/*</code> 路由均需登录；写操作还需同源 Origin 与 <code>X-CSRF-Token</code>。<code>GET /health</code> 仅证明 HTTP 包身份和存活，不代表执行通过。</p>
 <table>

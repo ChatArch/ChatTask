@@ -1,11 +1,13 @@
 """Offline contracts: only synthetic stores, Git roots, HTTP and Sandbox fakes."""
 import asyncio
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+import tarfile
 import time
 from types import SimpleNamespace
 import unittest
@@ -43,6 +45,20 @@ class GitSourceTests(unittest.TestCase):
             git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'synthetic private config')
             with self.assertRaisesRegex(ValueError, 'private configuration'):
                 source.snapshot(repo)
+
+    def test_snapshot_contains_every_accepted_tracked_blob_despite_export_ignore(self):
+        with tempfile.TemporaryDirectory(dir=os.environ['CHATTASK_TEST_SCRATCH']) as temp:
+            root=Path(temp)
+            def git(*args):return subprocess.check_output(['git','-C',str(root),*args],stderr=subprocess.DEVNULL)
+            git('init','-q')
+            (root/'included.py').write_text('included=True')
+            (root/'export_ignored.py').write_text('must be tested')
+            (root/'.gitattributes').write_text('export_ignored.py export-ignore\n')
+            git('add','included.py','export_ignored.py','.gitattributes')
+            git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','export ignore fixture')
+            snap=GitSource().snapshot(GitSource().register('demo',str(root),'owner/demo',package_name='demo'))
+            with tarfile.open(fileobj=io.BytesIO(snap['archive']),mode='r:') as archive:
+                self.assertEqual(archive.extractfile('export_ignored.py').read(),b'must be tested')
 
 
 class ToolClientTests(unittest.TestCase):
@@ -204,9 +220,9 @@ class AnnotatedTagReconciliationTests(unittest.TestCase):
         repo=Mock()
         repo.get_pull.return_value=SimpleNamespace(merged=True,base=SimpleNamespace(ref='main'),
                                                    head=SimpleNamespace(sha=source),merge_commit_sha=merged)
-        repo.get_commit.return_value.get_check_runs.return_value=[SimpleNamespace(name='test',status='completed',conclusion='success')]
+        repo.get_commit.return_value.get_check_runs.return_value=[SimpleNamespace(name='test',status='completed',conclusion='success',details_url='https://github.com/owner/example/actions/runs/7/job/8')]
         repo.get_git_commit.return_value.tree.sha='c'*40
-        repo.get_workflow_runs.return_value=[SimpleNamespace(name='CI',status='completed',conclusion='success')]
+        repo.get_workflow_runs.return_value=[SimpleNamespace(id=7,name='CI',path='.github/workflows/ci.yml',head_sha=source,status='completed',conclusion='success')]
         repo.get_branch.return_value.commit.sha=merged
         repo.compare.return_value.status='identical'
         repo.get_contents.return_value.decoded_content=b'on:\n  push:\n    tags:\n      - "v*"\npermissions: id-token: write\nuses: pypa/gh-action-pypi-publish@release/v1'
@@ -257,19 +273,19 @@ class CancellationTests(unittest.TestCase):
 
 class ImmutableReleaseInputTests(unittest.TestCase):
     @staticmethod
-    def fixture(*,merge_tree='d'*40,check_names=('test','deploy')):
+    def fixture(*,merge_tree='d'*40,check_names=('test','deploy'),ci_path='.github/workflows/ci.yml'):
         from unittest.mock import Mock
         source='a'*40;merged='b'*40
         repo=Mock()
         repo.get_pull.return_value=SimpleNamespace(merged=True,base=SimpleNamespace(ref='main'),
             head=SimpleNamespace(sha=source),merge_commit_sha=merged)
-        repo.get_commit.return_value.get_check_runs.return_value=[SimpleNamespace(name=n,status='completed',conclusion='success') for n in check_names]
+        repo.get_commit.return_value.get_check_runs.return_value=[SimpleNamespace(name=n,status='completed',conclusion='success',details_url='https://github.com/owner/demo/actions/runs/7/job/8') for n in check_names]
         repo.get_branch.return_value.commit.sha=merged
         repo.compare.return_value.status='identical'
         def git_commit(sha):
             return SimpleNamespace(tree=SimpleNamespace(sha='c'*40 if sha==source else merge_tree))
         repo.get_git_commit.side_effect=git_commit
-        repo.get_workflow_runs.return_value=[SimpleNamespace(name='CI',path='.github/workflows/ci.yml',
+        repo.get_workflow_runs.return_value=[SimpleNamespace(id=7,name='CI',path=ci_path,
             head_sha=source,event='pull_request',status='completed',conclusion='success')]
         repo.get_contents.return_value.decoded_content=b'on:\n  push:\n    tags:\n      - "v*"\npermissions: id-token: write\nuses: pypa/gh-action-pypi-publish@release/v1'
         repo.get_git_ref.return_value.object=SimpleNamespace(type='commit',sha=merged)
@@ -289,6 +305,11 @@ class ImmutableReleaseInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ReleaseBlocked,'CI|test'):
             ChatGHReleaseAdapter(provider=provider)._tag_sync(run)
         repo.create_git_ref.assert_not_called()
+    def test_other_workflow_named_ci_cannot_substitute_for_project_ci(self):
+        repo,provider,run=self.fixture(merge_tree='c'*40,ci_path='.github/workflows/other.yml')
+        with self.assertRaisesRegex(ReleaseBlocked,'CI'):
+            ChatGHReleaseAdapter(provider=provider)._tag_sync(run)
+        repo.create_git_ref.assert_not_called()
 
 
 class ReleaseGateTests(unittest.TestCase):
@@ -301,9 +322,9 @@ class ReleaseGateTests(unittest.TestCase):
                 return SimpleNamespace(merged=True, base=SimpleNamespace(ref='main'),
                     head=SimpleNamespace(sha='a' * 40), merge_commit_sha=merge_sha)
             def get_commit(self, sha):
-                return SimpleNamespace(get_check_runs=lambda: [SimpleNamespace(name='test', status='completed', conclusion='success')])
+                return SimpleNamespace(get_check_runs=lambda: [SimpleNamespace(name='test', status='completed', conclusion='success',details_url='https://github.com/owner/demo/actions/runs/7/job/8')])
             def get_git_commit(self, sha): return SimpleNamespace(tree=SimpleNamespace(sha='c'*40))
-            def get_workflow_runs(self, **kwargs): return [SimpleNamespace(name='CI', status='completed', conclusion='success')]
+            def get_workflow_runs(self, **kwargs): return [SimpleNamespace(id=7,name='CI',path='.github/workflows/ci.yml',head_sha='a'*40,status='completed', conclusion='success')]
             def get_branch(self, branch): return SimpleNamespace(commit=SimpleNamespace(sha=merge_sha))
             def compare(self, base, head): return SimpleNamespace(status='identical')
             def get_contents(self, path, ref):

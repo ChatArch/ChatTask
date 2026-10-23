@@ -61,12 +61,14 @@ class GitSource:
             raise ValueError('registered Git source is dirty; review and clean it before running')
         sha = _git(root, 'rev-parse', '--verify', 'HEAD^{commit}').decode().strip()
         tree_sha = _git(root, 'rev-parse', '--verify', 'HEAD^{tree}').decode().strip()
+        members = []
         entries = _git(root, 'ls-tree', '-r', '-z', sha).split(b'\0')
         for entry in entries:
             if not entry:
                 continue
             metadata, name = entry.split(b'\t', 1)
-            if not metadata.startswith(b'100644 blob ') and not metadata.startswith(b'100755 blob '):
+            fields = metadata.split(b' ')
+            if len(fields) != 3 or fields[0] not in (b'100644', b'100755') or fields[1] != b'blob':
                 raise ValueError('tracked symlinks and submodules are not accepted')
             parts = name.split(b'/')
             lowered = [part.lower() for part in parts]
@@ -75,13 +77,33 @@ class GitSource:
                 raise ValueError('tracked private configuration is not accepted')
             if any(part in (b'', b'.', b'..') for part in parts):
                 raise ValueError('unsafe tracked path')
-        archive = _git(root, 'archive', '--format=tar', sha)
-        if len(archive) > _MAX_ARCHIVE:
+            try:
+                path = name.decode('utf-8')
+                blob = fields[2].decode('ascii')
+            except UnicodeDecodeError as exc:
+                raise ValueError('tracked source path must be UTF-8') from exc
+            if not re.fullmatch(r'[0-9a-f]{40,64}', blob):
+                raise ValueError('invalid tracked blob identity')
+            members.append((path, int(fields[0], 8), blob))
+        # Do not use git archive: export-ignore/export-subst attributes can make
+        # the tested input differ from the recorded Git tree. Rebuild a tar from
+        # the exact pinned blob identities so every accepted tree member is tested.
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode='w') as tar:
+            for path, mode, blob in sorted(members):
+                data = _git(root, 'cat-file', 'blob', blob)
+                info = tarfile.TarInfo(path)
+                info.mode = mode
+                info.uid = info.gid = 0
+                info.uname = info.gname = ''
+                info.mtime = 0
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        archive = stream.getvalue()
+        if not archive or len(archive) > _MAX_ARCHIVE:
             raise ValueError('tracked source archive exceeds 32 MiB')
         with tarfile.open(fileobj=io.BytesIO(archive), mode='r:') as tar:
-            for member in tar:
-                if not member.isfile() and not member.isdir():
-                    raise ValueError('source archive contains unsupported entry')
-                if member.name.startswith('/') or '..' in Path(member.name).parts:
-                    raise ValueError('unsafe source archive path')
+            names = {member.name for member in tar if member.isfile()}
+            if names != {path for path, _mode, _blob in members}:
+                raise ValueError('source archive does not match the pinned Git tree')
         return {'sha': sha, 'tree_sha': tree_sha, 'archive': archive}

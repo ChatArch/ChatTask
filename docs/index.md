@@ -41,7 +41,7 @@ chattask repository register --id demo --path /srv/managed/demo --github-repo ow
 chattask serve --env-profile site --host 127.0.0.1 --port 8000
 ```
 
-仓库运行时再次检查干净状态，并绑定 HEAD。只归档跟踪源码；拒绝符号链接、子模块、私密配置和超出大小上限的归档。安装依赖发生于 Sandbox 内，默认只使用公共 PyPI，设置有限重试、命令与总时限；不传递宿主代理或供应方凭据。网络不稳定时，可由可信操作员提供与工作负载Python小版本和架构匹配的公共依赖 `deps/` tar.gz 归档：在ChatTask profile同时设置 `CHATTASK_PUBLIC_DEPS_PATH`（绝对路径）与 `CHATTASK_PUBLIC_DEPS_SHA256`。启动时会核对摘要/大小和成员安全，仅把公开依赖送入Sandbox；此模式项目安装使用 `--no-index`，缺依赖会失败，不会误报测试成功。登录、Cookie、Origin 和 CSRF 由 ChatLogin 处理。
+仓库运行时再次检查干净状态，并绑定 HEAD 与树。只归档跟踪源码；归档直接从固定 Git blob 重建，不受 `export-ignore`/`export-subst` 影响；拒绝符号链接、子模块、私密配置和超出大小上限的归档。安装依赖发生于 Sandbox 内，默认只使用公共 PyPI，设置有限重试、命令与总时限；不传递宿主代理或供应方凭据。网络不稳定时，可由可信操作员提供与工作负载Python小版本和架构匹配的公共依赖 `deps/` tar.gz 归档：在ChatTask profile同时设置 `CHATTASK_PUBLIC_DEPS_PATH`（绝对路径）与 `CHATTASK_PUBLIC_DEPS_SHA256`。启动时会核对摘要/大小和成员安全，仅把公开依赖送入Sandbox；此模式项目安装使用 `--no-index`，缺依赖会失败，不会误报测试成功。登录、Cookie、Origin 和 CSRF 由 ChatLogin 处理。
 
 ## 网页流程
 

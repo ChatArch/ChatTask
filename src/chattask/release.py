@@ -48,9 +48,19 @@ class ChatGHReleaseAdapter:
         if (not checks or any(c.status != 'completed' or c.conclusion != 'success' for c in checks)
                 or not any(c.name == 'test' and c.status == 'completed' and c.conclusion == 'success' for c in checks)):
             raise ReleaseBlocked('exact PR HEAD project CI check is missing or not green')
-        ci_runs = list(repo.get_workflow_runs(head_sha=pr_head, event='pull_request'))
-        if not any(workflow_run.name == 'CI' and workflow_run.status == 'completed' and workflow_run.conclusion == 'success' for workflow_run in ci_runs):
-            raise ReleaseBlocked('exact PR HEAD CI workflow is missing or not green')
+        ci_runs = [workflow_run for workflow_run in repo.get_workflow_runs(head_sha=pr_head, event='pull_request')
+                   if workflow_run.name == 'CI'
+                   and workflow_run.path == '.github/workflows/ci.yml'
+                   and workflow_run.head_sha == pr_head
+                   and workflow_run.status == 'completed'
+                   and workflow_run.conclusion == 'success']
+        if not ci_runs:
+            raise ReleaseBlocked('exact PR HEAD project CI workflow is missing or not green')
+        ci_run_ids = {str(workflow_run.id) for workflow_run in ci_runs}
+        if not any(check.name == 'test' and check.status == 'completed' and check.conclusion == 'success'
+                   and any(f'/runs/{run_id}/' in str(getattr(check, 'details_url', '') or getattr(check, 'html_url', ''))
+                           for run_id in ci_run_ids) for check in checks):
+            raise ReleaseBlocked('exact PR HEAD test check is not attached to the project CI workflow')
         default_sha = repo.get_branch(run['default_branch']).commit.sha
         compare = repo.compare(commit_sha, default_sha)
         if compare.status not in {'identical', 'ahead'}:

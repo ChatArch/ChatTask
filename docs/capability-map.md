@@ -1,35 +1,13 @@
 # 能力地图
 
-这个页面用于校对 `ChatTask` 当前有哪些一等能力、哪些能力已经验证，以及哪些事情不属于当前包。
+| 能力 | 当前实现 | 边界 |
+|---|---|---|
+| 模板与仓库 | 内置 Python 发布模板、自定义声明式修订、CLI 登记受信 Git 根 | 网页不能提交路径/URL/任意宿主命令；脏源与跟踪的私密配置被拒绝 |
+| 持久运行 | 私有原子 JSON、幂等请求 ID、所有者绑定、步骤回执、重启标记 | 同 UID 信任；中断不自动重放；不是分布式队列 |
+| Sandbox 预检 | 跟踪源码归档、真实测试/构建/Twine 检查、wheel/sdist 读回与 SHA256、销毁核验 | 项目代码仅在 Sandbox；600 秒后端 TTL，步骤与总时限有限 |
+| ChatPyPI 工具 | 复用 PyPI 命名配置及 ChatAuth TokenStore；有限制、无重定向的异步 REST | 初始只调用 `pkg_probe`；退出码 1 可以是名称已占用，不是 HTTP 故障 |
+| 发布批准 | 精确目标确认、预检提交/树、已合并 PR 的精确 `test` CI/CI工作流、合版树与预检树一致、默认分支/标签目标核验 | 创建标签后只标为等待 OIDC/PyPI 验证，不声称已发布；未知写入须核对 |
+| 网页 | ChatLogin/Origin/CSRF、进度/历史/取消/摘要下载、Sandbox 实验主导航 | 失效登录清空受保护状态；暂时失败保留过期视图提示 |
+| 旧 Sandbox 实验 | 固定整数统计与持续 Shell、显式回收 | Shell 与登录会话不跨重启恢复 |
 
-## 能力分组
-
-<div class="grid cards" markdown>
-
-- **命令行入口**
-
-    `chattask --help`、`chattask --version`、`chattask --tree` 和 `chattask --tree-brief` 是默认可验证入口。
-
-- **Python 接口**
-
-    实质能力应放到可 import 的 Python 函数、类或 service 层，而不是只写在 Click 回调里。
-
-- **配置与环境**
-
-    当前没有业务配置项；后续需要长期、常用、跨命令共享的配置时复用 ChatEnv。
-
-</div>
-
-## 当前边界
-
-| 能力 | 状态 | 说明 |
-| --- | --- | --- |
-| 命令行基础入口 | 已实现 | 模板生成 Click group、`--version`、ChatStyle 共享树选项和基础测试。 |
-| ChatEnv 配置提供者 | 未启用 | 当前无业务配置需求，不预设配置字段。 |
-| 业务命令 | 未实现 | 按当前包真实需求补充，不能在模板里伪造未来命令。 |
-
-## 不在当前范围
-
-- 不生成计划类占位页。
-- 不把未实现能力写成用户可执行教程。
-- 不在 README、docs、issue、PR 评论或 CI log 中输出 secret、token、cookie 或 Authorization header。
+普通 Docker/runc 不等于强对抗隔离。真实部署、供应方与浏览器验收在源码测试之外。

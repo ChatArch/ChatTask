@@ -1,65 +1,28 @@
-<div align="center">
-    <a href="https://pypi.python.org/pypi/ChatTask">
-        <img src="https://img.shields.io/pypi/v/ChatTask.svg" alt="PyPI version" />
-    </a>
-    <a href="https://github.com/ChatArch/ChatTask/actions/workflows/ci.yml">
-        <img src="https://github.com/ChatArch/ChatTask/actions/workflows/ci.yml/badge.svg" alt="Tests" />
-    </a>
-    <a href="https://arch.gh.wzhecnu.cn/ChatTask/">
-        <img src="https://img.shields.io/badge/docs-mkdocs-blue.svg" alt="Documentation" />
-    </a>
-</div>
-
-<div align="center">
-
-[English](README.en.md) | [简体中文](README.md)
-</div>
-
 # ChatTask
 
-ChatTask is a ChatArch Python package. Version `0.0.2` validates the release pipeline with the standard CLI skeleton only; domain features are not defined or implemented yet.
+English | [简体中文](README.md)
 
+Starting with 0.1.0, ChatTask adds reusable task templates, trusted Git snapshots, real Sandbox preflight, durable runs and explicit release approval while preserving the integer-statistics task and persistent Shell experiment. Historical 0.0.2 is only a scaffold; check the actual PyPI and installed `chattask --version` before relying on these capabilities.
 
-Documentation entry: <https://arch.gh.wzhecnu.cn/ChatTask/en/>
+- **Templates**: a built-in Python package release preflight and versioned custom templates limited to approved probe, test, build and check steps.
+- **Real execution**: an operator registers a clean Git root; a run binds HEAD. Only tracked source enters an owned Sandbox. Actual exit codes, logs, wheel/sdist hashes and independently checked cleanup are recorded.
+- **Release gate**: preflight is the default. A GitHub tag needs separate confirmation bound to repository, version, source commit, source tree and text; it also requires a merged PR, exact `test` CI/workflow and equality of merged/preflight trees. A verified tag still awaits independent OIDC workflow and PyPI artifact verification.
+- **Persistent UI**: reconnect from history, cooperative cancellation, digest-checked downloads, protected tool status and auth-loss cleanup. The older Sandbox experiments remain under a primary tab.
 
-Choose documentation by scenario:
-
-| Scenario | Document |
-| --- | --- |
-| Install the package, run the CLI, and confirm it works | `docs/cli-tree.en.md` |
-| Check first-class capabilities and current boundaries | `docs/capability-map.en.md` |
-| Call package behavior directly from Python | `docs/interface-tree.md` |
-
-## Quick Start
+## Run from source
 
 ```bash
-pip install -e ".[dev]"
-chattask --help
-chattask --version
+python -m pip install -e '.[web,dev]'
 chattask --tree
-chattask --tree-brief
-python -m pytest -q
-python -m build
+chattask paths --json-output
+chattask repository register --id demo --path /srv/managed/demo --github-repo owner/demo --package-name demo
+chattask serve --env-profile site --host 127.0.0.1 --port 8000
 ```
 
-## CLI Contract
+Configure the existing OpenSandbox control plane, a site account and an existing PyPI ChatEnv named connection `task-tools` first; see the [integration guide](docs/index.en.md). Only the operator CLI accepts repository paths; the browser selects IDs. Deployed Web, tool, Sandbox and ChatGH acceptance remains with the deployer; source tests use labelled synthetic dependencies.
 
-This template depends on `chatstyle>=0.2.0,<0.3.0` and `chatenv>=0.2.11,<0.3.0`. New commands should prefer:
+## Boundary
 
-- `add_tree_option()` for shared `--tree` / `--tree-brief` flags and `render_click_tree()` to render registered Click metadata.
-- `CommandSchema` / `CommandField` for inputs.
-- `add_interactive_option()` for the shared `-i/-I` switch.
-- `resolve_command_inputs()` for missing args, defaults, TTY behavior, and validation.
-- No domain configuration or empty ChatEnv provider is registered yet. Reuse ChatEnv typed profiles when actual configuration is needed.
+This is a trusted single-user service. Project build/test code executes only inside the Sandbox; ordinary Docker/runc is not strong hostile-code isolation. Run records survive restarts, but interrupted work requires reconciliation and uncertain writes are never replayed automatically. Login sessions and old Shell history still do not survive restarts. Candidate source does not imply deployment or publication.
 
-## Layout
-
-- `src/`: package source code
-- `tests/code-tests/`: code tests and migrated historical tests
-- `tests/cli-tests/`: real CLI tests, doc-first
-- `tests/mock-cli-tests/`: mock/fake CLI tests, doc-first
-- `docs/`: long-lived project docs built by mkdocs
-
-## Development Notes
-
-See `DEVELOP.md` and `AGENTS.md` before expanding the scaffold.
+[CLI](docs/cli-tree.en.md) · [Capabilities](docs/capability-map.en.md) · [Python API](docs/interface-tree.en.md)

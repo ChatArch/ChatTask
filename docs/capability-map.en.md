@@ -1,35 +1,13 @@
-# Capability Map
+# Capability map
 
-Use this page to check which first-class capabilities `ChatTask` currently owns, which ones are verified, and what remains out of scope for this package.
+| Capability | Implementation | Boundary |
+|---|---|---|
+| Templates and repositories | Built-in Python release template, declarative custom revisions, trusted Git roots registered by CLI | Browser cannot submit paths, URLs or host commands; dirty source and tracked private configuration are rejected |
+| Durable runs | Private atomic JSON, idempotent request IDs, owner binding, step receipts and restart marking | Same-UID trust; no replay of interrupted work; not a distributed queue |
+| Sandbox preflight | Tracked archive, real tests/build/Twine check, wheel/sdist readback and SHA256, verified destruction | Project code runs only in Sandbox; backend TTL 600 seconds with bounded commands and total time |
+| ChatPyPI tools | Existing PyPI named configuration and ChatAuth TokenStore; bounded non-redirecting async REST | Initial approved tool is `pkg_probe`; exit 1 can mean an occupied name, not an HTTP failure |
+| Release approval | Exact target confirmation, preflight commit/tree, merged PR exact `test` CI/CI workflow, equality of merged/preflight trees, default branch and tag-target verification | A tag awaits OIDC/PyPI verification and is never labelled published; uncertain writes require reconciliation |
+| Web | ChatLogin/Origin/CSRF, progress/history/cancel/digest downloads, Sandbox experiment tab | Auth loss clears private state; transient errors show a stale-view warning |
+| Existing experiments | Fixed integer statistics and persistent Shell with explicit cleanup | Shell and login sessions do not survive restart |
 
-## Capability Groups
-
-<div class="grid cards" markdown>
-
-- **CLI Entry**
-
-    `chattask --help`, `chattask --version`, `chattask --tree`, and `chattask --tree-brief` are the default verification entry points.
-
-- **Python API**
-
-    Substantive behavior should live in importable Python functions, classes, or service layers rather than only in Click callbacks.
-
-- **Config and Environment**
-
-    There is no domain configuration yet. Reuse ChatEnv for stable, shared settings when needed.
-
-</div>
-
-## Current Boundary
-
-| Capability | Status | Notes |
-| --- | --- | --- |
-| CLI base entry | Implemented | The template generates a Click group, `--version`, shared ChatStyle tree options, and base tests. |
-| ChatEnv provider | Not enabled | No domain configuration or placeholder credential fields are needed yet. |
-| Business commands | Not implemented | Add these from the real package domain; do not fake future commands in the template. |
-
-## Out of Scope
-
-- No plan placeholder page is generated.
-- No unimplemented capability should be written as a user operation tutorial.
-- No secret, token, cookie, or Authorization header should appear in README, docs, issues, PR comments, or CI logs.
+Ordinary Docker/runc is not strong hostile-code isolation. Deployed provider and browser acceptance is separate from source tests.

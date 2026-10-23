@@ -27,7 +27,7 @@ def test_tree_option_prints_registered_cli_tree():
     assert "├── --help" in result.output
     assert "├── --version" in result.output
     assert "├── --tree" in result.output
-    assert "└── --tree-brief" in result.output
+    assert "├── --tree-brief" in result.output
 
 
 def test_tree_brief_option_prints_registered_cli_tree():
@@ -36,4 +36,4 @@ def test_tree_brief_option_prints_registered_cli_tree():
     assert result.exit_code == 0, result.output
     assert result.output.startswith("chattask\n")
     assert "├── --tree" in result.output
-    assert "└── --tree-brief" in result.output
+    assert "├── --tree-brief" in result.output

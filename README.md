@@ -2,12 +2,12 @@
 
 [English](README.en.md) | 简体中文
 
-ChatTask 提供可复用的 Task/Sandbox 执行服务和可选的登录网页。当前源码为 **0.1.0.dev0 未发布候选**；PyPI 的 0.0.2 仍是旧骨架，不能把以下能力当作该公开版本已经提供的功能。
+ChatTask 提供可复用的任务模板、受信 Git 源码快照、真实 Sandbox 预检、持久运行记录和显式发布批准，同时保留整数统计 Task 与持续 Shell 实验。当前源码为 **0.1.0.dev0 未发布候选**；PyPI 的 0.0.2 仍是旧骨架。
 
-- **一次性 Task**：输入整数，在新 OpenSandbox 中写入 Python 统计程序和测试，返回真实结果并销毁环境。
-- **持续会话**：复用同一个 Sandbox 和 Bash，跨请求保留 cwd、变量和文件，显式销毁或5分钟后回收。
-- **Python + Web 共用服务层**：TaskService、TaskSettings、create_app、state_paths；CLI 是薄入口，导入不安装或启动后台服务。
-- **共享基础组件**：ChatEnv typed profile、ChatStyle CLI树、ChatLogin登录/会话/CSRF。
+- **任务模板**：内置 Python 包发布预检；自定义模板只能选用允许的探测、测试、构建和检查步骤，并保留修订版本。
+- **真实执行**：管理员登记干净 Git 根目录，运行绑定 HEAD；跟踪源码归档只进入受控 Sandbox，结果记录真实退出码、日志、wheel/sdist 摘要和独立清理证据。
+- **发布门禁**：默认仅预检。创建 GitHub 标签需针对仓库、版本、源码 SHA 和确认文字再次批准，并核验已合并 PR 与精确检查。标签只代表等待 OIDC 工作流和 PyPI 产物独立核验。
+- **持久页面**：刷新后从运行历史重新连接；支持合作式取消、摘要校验下载、受保护的工具状态与失效登录清理。Sandbox 实验仍有独立主导航。
 
 ## 从源码使用
 
@@ -15,23 +15,14 @@ ChatTask 提供可复用的 Task/Sandbox 执行服务和可选的登录网页。
 python -m pip install -e '.[web,dev]'
 chattask --tree
 chattask paths --json-output
+chattask repository register --id demo --path /srv/managed/demo --github-repo owner/demo --package-name demo
 chattask serve --env-profile site --host 127.0.0.1 --port 8000
 ```
 
-启动前需要配置现有 OpenSandbox 控制面、Docker 访问权限和站点账号，详见 [快速接入](docs/index.md)。服务器环境安装/准备归 ChatUp 或已有运行环境，不在 import 或 Web 请求中执行。
+必须先配置已有 OpenSandbox 控制面、站点账号和既有 PyPI ChatEnv 命名连接 `task-tools`；配置详情见[快速接入](docs/index.md)。仓库路径只可通过服务器 CLI 登记，浏览器只能选择 ID。Web、Tool、Sandbox 和 ChatGH 的真实生产验收由部署方完成；源码测试使用标明的合成依赖。
 
 ## 边界
 
-这是受信单用户实验：固定数字统计任务不是自然语言 Agent；普通 Docker/runc 不等于强隔离。不支持匿名执行、多租户生产隔离、完整PTY、数小时耐久或重启恢复Shell。登录会话在内存中，重启需要重新登录；刷新页面不恢复终端历史。
+这是受信单用户服务。项目的构建/测试代码仅在 Sandbox 内执行；普通 Docker/runc 不等于强隔离。运行记录持久化，重启后中断的执行标为待核对且不会自动重放不确定写入。登录会话和旧 Shell 历史仍不跨重启恢复。代码候选不代表已部署或已发布。
 
 [CLI 树](docs/cli-tree.md) · [能力地图](docs/capability-map.md) · [Python API](docs/interface-tree.md)
-
-## 开发验证
-
-```bash
-python -m pytest -q
-python -m build
-mkdocs build --strict
-```
-
-发布、公开文档部署和实际服务迁移是独立验收门，候选代码不代表已发布。

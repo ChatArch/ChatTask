@@ -5,12 +5,17 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 from . import __version__
 from .settings import TaskSettings, load_settings
 from .service import TaskService
 from .auth import create_auth
+from .settings import state_paths
+from .workflow import TaskStore, WorkflowService
+from .executor import SandboxExecutor
+from .tool_client import ChatPyPITools
+from .release import ChatGHReleaseAdapter
 
 ROOT=Path(__file__).resolve().parent
 
@@ -20,18 +25,25 @@ class TaskInput(BaseModel):
 class CommandInput(BaseModel):
     command: str = Field(min_length=1,max_length=256)
 
-def create_app(settings: TaskSettings | None=None, *, service: TaskService | None=None) -> FastAPI:
+def create_app(settings: TaskSettings | None=None, *, service: TaskService | None=None,
+               workflow: WorkflowService | None=None) -> FastAPI:
     """Construct explicitly; importing this module does not connect/start anything."""
     settings = settings if settings is not None else load_settings()
     auth = create_auth(settings)
     service = service if service is not None else TaskService(settings)
+    workflow = workflow if workflow is not None else WorkflowService(
+        TaskStore(state_paths(home=settings.home)['state_dir']),
+        executor=SandboxExecutor(service), tool_client=ChatPyPITools(settings.tool_profile),
+        release_adapter=ChatGHReleaseAdapter())
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        await workflow.recover()
         sweep = asyncio.create_task(service.sweep())
         try:
             yield
         finally:
             sweep.cancel()
+            await workflow.shutdown()
             try:
                 await service.shutdown()
             except Exception:
@@ -132,4 +144,101 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
             raise HTTPException(404, detail=str(exc))
         except Exception as exc:
             raise HTTPException(503, detail=f'cleanup failed: {type(exc).__name__}')
+
+    async def owner(request: Request) -> str:
+        principal = await auth.current_user(request)
+        return principal.user_id
+
+    @app.get('/api/templates')
+    async def templates():
+        return {'templates': workflow.templates()}
+
+    @app.post('/api/templates')
+    async def create_template(body: dict):
+        try:
+            return workflow.save_template(body)
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc))
+
+    @app.put('/api/templates/{template_id}')
+    async def revise_template(template_id: str, body: dict):
+        if body.get('id') != template_id:
+            raise HTTPException(422, detail='template ID mismatch')
+        try:
+            return workflow.save_template(body, update=True)
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc))
+
+    @app.get('/api/templates/{template_id}/revisions')
+    async def template_revisions(template_id: str):
+        try:
+            return {'revisions': workflow.revisions(template_id)}
+        except ValueError:
+            raise HTTPException(404, detail='template not found')
+
+    @app.get('/api/templates/{template_id}/revisions/{revision}')
+    async def template_revision(template_id: str, revision: int):
+        try:
+            return workflow.template(template_id, revision)
+        except (FileNotFoundError, ValueError):
+            raise HTTPException(404, detail='template revision not found')
+
+    @app.get('/api/repositories')
+    async def repositories():
+        return {'repositories': workflow.repositories()}
+
+    @app.get('/api/tool-connections/status')
+    async def tool_connection_status():
+        if workflow.tool_client is None:
+            return {'available': False, 'reason': 'tool client unavailable'}
+        return await workflow.tool_client.status()
+
+    @app.post('/api/runs')
+    async def create_run(request: Request, body: dict):
+        try:
+            return await workflow.create_run(await owner(request), body)
+        except FileNotFoundError:
+            raise HTTPException(404, detail='template or repository not found')
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc))
+
+    @app.get('/api/runs')
+    async def runs(request: Request):
+        return {'runs': workflow.list_runs(await owner(request))}
+
+    @app.get('/api/runs/{run_id}')
+    async def run_detail(request: Request, run_id: str):
+        try:
+            return workflow.get_run(await owner(request), run_id)
+        except (KeyError, FileNotFoundError, ValueError):
+            raise HTTPException(404, detail='run not found')
+
+    @app.post('/api/runs/{run_id}/cancel')
+    async def cancel_run(request: Request, run_id: str):
+        try:
+            return await workflow.cancel(await owner(request), run_id)
+        except (KeyError, FileNotFoundError):
+            raise HTTPException(404, detail='run not found')
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc))
+
+    @app.post('/api/runs/{run_id}/approve')
+    async def approve_run(request: Request, run_id: str, body: dict):
+        try:
+            return await workflow.approve(await owner(request), run_id, body)
+        except (KeyError, FileNotFoundError):
+            raise HTTPException(404, detail='run not found')
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc))
+
+    @app.get('/api/runs/{run_id}/artifacts/{name}')
+    async def download_artifact(request: Request, run_id: str, name: str):
+        try:
+            data = workflow.artifact(await owner(request), run_id, name)
+            record = workflow.get_run(await owner(request), run_id)
+        except (KeyError, FileNotFoundError, ValueError):
+            raise HTTPException(404, detail='artifact not found or failed integrity check')
+        digest = next(item['sha256'] for item in record['artifacts'] if item['name'] == name)
+        return Response(data, media_type='application/octet-stream', headers={
+            'Content-Disposition': f'attachment; filename="{name}"', 'X-Content-SHA256': digest})
     return app

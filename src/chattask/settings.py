@@ -29,6 +29,7 @@ class TaskSettings:
     password: str=field(default='',repr=False)
     image: str='python:3.10-slim'
     home: str | Path | None=None
+    tool_profile: str='task-tools'
 
     def __post_init__(self):
         object.__setattr__(self,'endpoint',_origin(self.endpoint))
@@ -62,4 +63,4 @@ def load_settings(*,profile: str | None=None,home: str | Path | None=None,overri
         if not resolved.get(key):raise ValueError('Missing ChatTask configuration: '+key)
     return TaskSettings(endpoint=resolved['CHATTASK_SANDBOX_ENDPOINT'],api_key=resolved['CHATTASK_SANDBOX_API_KEY'],
                         origin=resolved['CHATTASK_WEB_ORIGIN'],username=resolved.get('CHATTASK_LOGIN_USERNAME') or '',
-                        password=resolved.get('CHATTASK_LOGIN_PASSWORD') or '',image=resolved['CHATTASK_IMAGE'],home=home)
+                        password=resolved.get('CHATTASK_LOGIN_PASSWORD') or '',image=resolved['CHATTASK_IMAGE'],home=home,tool_profile=resolved['CHATTASK_TOOL_PROFILE'])

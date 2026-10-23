@@ -1,72 +1,69 @@
 # ChatTask 快速接入
 
-当前是0.1.0.dev0源码候选，不是已经发布的PyPI0.0.2功能。
+当前是 0.1.0.dev0 源码候选，不是已经发布的 PyPI 0.0.2 功能。原有整数统计与持续 Shell 实验仍可在网页主导航中使用。
 
-## 先理解三层
+## 架构与前置条件
 
 ```text
-浏览器 / Python 调用方
-         ↓
-ChatTask：任务、持续会话、认证网页与同源 API
-         ↓
-OpenSandbox SDK → 已部署的控制面 → Docker 执行环境
+登录网页 → ChatTask 模板/私有运行记录 → ChatPyPI 元数据工具
+                                  └→ OpenSandbox → 跟踪源码测试、构建、检查
+明确批准 → ChatGH/GitHub 已合并 PR 与检查 → 标签 → 既有 OIDC 发布工作流
 ```
 
-ChatTask 调度显式派发的工作负载；它不会把宿主应用的全部 Python 代码自动放入沙盒。服务器安装、Docker/Python准备由 ChatUp 或既有环境负责。
+准备现有 OpenSandbox 控制面与 Docker、固定站点账号、发布版 ChatPyPI 服务、原生 ChatAuth 访问令牌，以及已有 PyPI ChatEnv 命名 profile。安装、服务部署、令牌签发与更新属于运行方，不由 ChatTask 自动完成。单个 Sandbox 仍受 600 秒底层 TTL、1 CPU、512 MiB、PIDs 128、回环端口和零宿主挂载约束；项目构建/测试代码只在其中执行。
 
-## 1. 安装候选
-
-在源码目录中：
+## 安装候选和设置
 
 ```bash
 python -m pip install -e '.[web]'
 chattask --tree
+chattask paths --json-output
 ```
 
-需已部署可用的 OpenSandbox 控制面；当前兼容路径验证使用SDK1.1.0、server0.2.3、execd1.1.0。版本组合不是隔离强度保证。执行服务需要访问其拥有的Docker实例，工作负载不挂载宿主目录或Docker socket，且实际发布端口必须仅回环。
-
-## 2. 建立 ChatEnv 配置
-
-```bash
-chatenv new site -t chattask -I --yes
-chatenv paste --stdin --profile site --yes -I
-```
-
-向stdin输入以下键，替换占位值后结束输入。不要把真实值写入源码、聊天或日志：
+建立 ChatTask ChatEnv 命名 profile，例如 `site`，填入占位值对应的实际配置：
 
 ```text
 CHATTASK_SANDBOX_ENDPOINT=http://127.0.0.1:8080
 CHATTASK_SANDBOX_API_KEY=<existing-control-plane-key>
 CHATTASK_IMAGE=python:3.10-slim
-CHATTASK_WEB_ORIGIN=https://sandbox.example.test
-CHATTASK_LOGIN_USERNAME=<explicit-site-account>
-CHATTASK_LOGIN_PASSWORD=<explicit-site-password>
+CHATTASK_WEB_ORIGIN=https://task.example.test
+CHATTASK_LOGIN_USERNAME=<site-account>
+CHATTASK_LOGIN_PASSWORD=<site-password>
+CHATTASK_TOOL_PROFILE=task-tools
 ```
 
-endpoint/origin必须是无用户名、密码、路径、query和fragment的HTTP(S)源。`--env-profile site`只读取该profile，不激活全局配置，也不继承其他账号的进程凭据。无显式profile时，进程变量可覆盖active配置。
+`CHATTASK_TOOL_PROFILE` 只是已有 PyPI 命名 profile 的指针。该 profile 由 ChatPyPI 的 `load_pypi_env_profile` 读取，应在 PyPI ChatEnv 命名空间中包含 `CHATPYPI_MODE=service`、`CHATPYPI_BASE_URL=http://127.0.0.1:10255` 和 `CHATPYPI_AUTH_PROFILE=task-pypi`。ChatTask 不复制 URL 或 token 字段；调用时通过原生 `TokenStore().read('ChatAuth', profile)` 获取访问令牌。初始服务只允许元数据探测，不通过 ChatPyPI 上传包。所有示例值均为占位值，不能写入源码或日志。
+
+服务器管理员登记干净的受信 Git 根目录，浏览器没有提交路径或 URL 的接口：
 
 ```bash
-chatenv test site -t chattask -I
-```
-
-此命令检查schema与敏感字段标记，不执行沙盒任务，也不证明远端控制面健康。
-
-## 3. 启动
-
-```bash
+chattask repository register --id demo --path /srv/managed/demo --github-repo owner/demo --default-branch main --package-name demo
 chattask serve --env-profile site --host 127.0.0.1 --port 8000
 ```
 
-将现有反向代理指向该回环端口，保留固定canonical origin和HTTPS上下文。Nginx只负责路由；登录、Cookie和CSRF由ChatLogin处理，不添加第二套Basic Auth。缺少显式账号/口令时服务拒绝启动，不内置生产默认账号。
+仓库运行时再次检查干净状态，并绑定 HEAD。只归档跟踪源码；拒绝符号链接、子模块、私密配置和超出大小上限的归档。安装依赖发生于 Sandbox 内，只使用公共 PyPI，设置有限重试、命令与总时限；不传递宿主代理或供应方凭据。登录、Cookie、Origin 和 CSRF 由 ChatLogin 处理。
 
-左侧提交1–8个整数，范围±10000，验证创建→写入→执行→测试→销毁。右侧可创建同一个Sandbox+Bash，命令最多8秒、256字符；会话最多5分钟、底层Sandbox TTL最多10分钟。每个工作负载1CPU、512MiB、PIDs128；同一服务只保留一个持续会话。
+## 网页流程
 
-## 4. 认证与清理
+选择模板、仓库、目标版本；可选填测试 extras（如 `web,dev`）和已合并 PR 编号，然后点击“创建并执行预检”。默认**只预检**。内置模板依次进行 `pkg_probe`、测试、wheel/sdist 构建、Twine 检查；探测退出码 1 可代表名称已占用，仍显示真实回执。每一步的退出码和日志、产物大小与 SHA256、Sandbox ID/清理证据会保存在私有运行记录中。刷新页面可从历史重连；浏览器断开不会取消运行。取消请求在步骤边界生效，且清理核验后才显示“已取消”。
 
-匿名API拒绝401；登录写操作需精确Origin和X-CSRF-Token，缺少或错误为403。Cookie在HTTPS下为Secure/HttpOnly/SameSite=Lax。前端退出前销毁自己的活动会话，并清理页面输出。登录会话在内存中，重启需重新登录。
+自定义模板可从内置模板选取声明式步骤、测试方式和说明并保存新修订，不接受任意宿主命令。只有通过测试、构建、检查并产生两个真实产物的运行可以进入发布批准。批准页要求手工输入准确的 `TAG owner/demo v1.2.3` 形式的确认文字，并核对绑定的仓库、版本、源码 SHA 与 PR。后端再次验证已合并 PR、精确 HEAD 检查、默认分支和标签目标。写入不确定时先查询稳定标签目标，绝不盲目重试。已核验的标签仍标记为“等待 OIDC 工作流和 PyPI 产物验证”，不会被称为已发布。
 
-`GET /health`返回包名、版本与服务身份，只证明HTTP服务存活。完整验收还需真实任务、持续命令、生命周期404和对应容器消失。不要用health200冒充隔离、执行或清理通过。
+## HTTP 合约
 
-## 5. 复用与边界
+私有 `/api/*` 路由均需登录；写操作还需同源 Origin 与 `X-CSRF-Token`。`GET /health` 仅证明 HTTP 包身份和存活，不代表执行通过。
 
-参见[Python接口](interface-tree.md)。本候选没有队列、数据库任务账本、MCP、LLM自动写代码、多租户授权或重启恢复；不要把普通Docker/runc宣称为强隔离。
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET / POST | `/api/templates` | 列出或创建声明式模板 |
+| PUT | `/api/templates/{id}` | 写入新修订，原修订运行不变 |
+| GET | `/api/templates/{id}/revisions[/{revision}]` | 查询不可变历史修订 |
+| GET | `/api/repositories` | 列出已登记仓库 ID 与公开元数据，不返回宿主路径 |
+| POST / GET | `/api/runs` | 以稳定 `request_id` 幂等创建预检 / 查询本人历史 |
+| GET | `/api/runs/{id}` | 本人运行、步骤、清理与发布状态 |
+| POST | `/api/runs/{id}/cancel` | 请求合作式取消 |
+| POST | `/api/runs/{id}/approve` | 按精确目标批准创建标签 |
+| GET | `/api/runs/{id}/artifacts/{name}` | 摘要复核后的二进制下载 |
+| GET | `/api/tool-connections/status` | 脱敏的连接可用性 |
+
+旧 `/api/tasks` 和 `/api/sessions` 路由仍在。运行在 `$CHATARCH_HOME/chattask` 下使用同 UID 私有目录和原子 JSON/产物文件；该信任模型不是多租户数据库。重启会把未完成或写入中的运行标记为中断，要求人工核对真实 Sandbox/远端目标，不自动重放。登录会话和持续 Shell 不跨重启恢复。

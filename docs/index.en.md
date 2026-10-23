@@ -1,60 +1,69 @@
 # ChatTask integration
 
-This is unreleased 0.1.0.dev0 source, not published PyPI 0.0.2 functionality.
+This is unreleased 0.1.0.dev0 source, not functionality of published PyPI 0.0.2. The older integer-statistics task and persistent Shell experiment remain in the primary navigation.
 
-## Architecture
+## Architecture and prerequisites
 
 ```text
-Browser / Python caller
-          ↓
-ChatTask: task/session core, authenticated Web and same-origin API
-          ↓
-OpenSandbox SDK → existing control plane → Docker workload
+Authenticated Web → ChatTask templates/private runs → ChatPyPI metadata tool
+                                           └→ OpenSandbox → tracked-source test/build/check
+Exact approval → ChatGH/GitHub merged PR and checks → tag → existing OIDC publish workflow
 ```
 
-Only explicitly dispatched work enters the sandbox. Importing ChatTask does not isolate all host Python code or install/start services. Environment preparation belongs to ChatUp or an existing deployment.
+Provide an existing OpenSandbox control plane and Docker access, a fixed site account, a published ChatPyPI service, a native ChatAuth access token and an existing PyPI ChatEnv named profile. The operator owns installation, deployment, token issue and renewal. ChatTask does not provision them. Each Sandbox remains bounded by the 600-second backend TTL, 1 CPU, 512 MiB, 128 PIDs, loopback ports and no host mounts. Project build/test code runs only inside it.
 
-## Install and configure
-
-From the candidate source:
+## Candidate setup
 
 ```bash
 python -m pip install -e '.[web]'
 chattask --tree
-chatenv new site -t chattask -I --yes
-chatenv paste --stdin --profile site --yes -I
+chattask paths --json-output
 ```
 
-Provide these keys on stdin, replacing placeholders without placing real secrets in code/logs:
+Create a ChatTask ChatEnv named profile such as `site` with actual values corresponding to these placeholders:
 
 ```text
 CHATTASK_SANDBOX_ENDPOINT=http://127.0.0.1:8080
 CHATTASK_SANDBOX_API_KEY=<existing-control-plane-key>
 CHATTASK_IMAGE=python:3.10-slim
-CHATTASK_WEB_ORIGIN=https://sandbox.example.test
-CHATTASK_LOGIN_USERNAME=<explicit-site-account>
-CHATTASK_LOGIN_PASSWORD=<explicit-site-password>
+CHATTASK_WEB_ORIGIN=https://task.example.test
+CHATTASK_LOGIN_USERNAME=<site-account>
+CHATTASK_LOGIN_PASSWORD=<site-password>
+CHATTASK_TOOL_PROFILE=task-tools
 ```
 
-Endpoints must be HTTP(S) origins without credentials, paths, query or fragment. Explicit named profiles never activate global defaults or inherit another account's process credentials. Without a named profile, process variables override active values.
+`CHATTASK_TOOL_PROFILE` is only a pointer to an existing PyPI named profile. ChatPyPI's `load_pypi_env_profile` reads that PyPI ChatEnv profile, which should contain `CHATPYPI_MODE=service`, `CHATPYPI_BASE_URL=http://127.0.0.1:10255` and `CHATPYPI_AUTH_PROFILE=task-pypi`. ChatTask does not duplicate service URL or token fields. At invocation it reads the native `TokenStore().read('ChatAuth', profile)` access token. The initial service permits metadata probes only, not ChatPyPI package upload. Example values are placeholders and do not belong in source or logs.
+
+An operator registers an exact clean trusted Git root. The browser has no path/URL registration route:
 
 ```bash
-chatenv test site -t chattask -I
+chattask repository register --id demo --path /srv/managed/demo --github-repo owner/demo --default-branch main --package-name demo
 chattask serve --env-profile site --host 127.0.0.1 --port 8000
 ```
 
-The ChatEnv test validates schema/secret markers, not a remote workload. Reuse an existing reverse proxy and preserve the fixed origin/HTTPS metadata. Authentication belongs to ChatLogin, not a second Nginx Basic Auth prompt. An explicit site account/password is required.
+At run time the repository is checked again and HEAD is pinned. Only tracked source is archived; symlinks, submodules, private configuration and oversized archives are rejected. Dependencies install inside the Sandbox from public PyPI with finite retries and command/total deadlines, without host proxy or provider credentials. ChatLogin owns login, cookies, Origin and CSRF.
 
-## Runtime contract
+## Browser flow
 
-The verified compatibility path uses SDK1.1.0, server0.2.3 and execd1.1.0. Runtime version compatibility is not a security-isolation guarantee. The trusted server requires access to its Docker instance. Workloads mount no host directories or Docker socket; published execution ports must actually bind loopback.
+Select a template, repository and target version; optionally provide test extras (such as `web,dev`) and a merged PR number, then create a preflight. **Preflight is the default.** The built-in template executes `pkg_probe`, tests, wheel/sdist build and Twine check. Probe exit 1 can mean an occupied name; its actual receipt is shown. Real exit codes/logs, artifact sizes/SHA256, Sandbox ID and cleanup evidence are persisted. Refresh reconnects from history; disconnect does not cancel. Cancellation is cooperative at step boundaries and only becomes “cancelled” after verified cleanup.
 
-One-shot tasks accept1–8 integers in±10000 and write/run/test a fixed statistics program. Persistent Bash commands are bounded to256 characters and8 seconds. Sessions last at most5 minutes, underlying Sandbox TTL at most10 minutes; workloads use1CPU,512MiB andPIDs128. One service owns at most one persistent session.
+Custom templates can select declarative steps, test suite and description, then save a new revision. They cannot submit arbitrary host commands. Only a run with passed tests, build, check and two real artifacts can reach release approval. Approval requires manually typing the exact `TAG owner/demo v1.2.3` confirmation and binds repository, version, source SHA and PR. The backend verifies merged PR, exact HEAD checks, default branch and tag target. Ambiguous writes reconcile by stable tag target instead of blind retries. A verified tag is still “awaiting OIDC workflow and PyPI artifact verification,” never “published.”
 
-Anonymous APIs return401. Authenticated mutations require exact Origin and CSRF. HTTPS cookies are Secure/HttpOnly/SameSite=Lax. Login sessions are in memory; restart requires re-login. The UI destroys its active session before logout and clears private output.
+## HTTP contract
 
-`GET /health` identifies the HTTP package/version only. Real acceptance includes task output, repeated shell commands, lifecycle404 and absence of the exact container. Health200 is not execution/isolation proof.
+Private `/api/*` routes require login; writes additionally require same-origin Origin and `X-CSRF-Token`. `GET /health` only identifies the HTTP package and liveness.
 
-## Boundaries
+| Method | Path | Purpose |
+|---|---|---|
+| GET / POST | `/api/templates` | List or create declarative templates |
+| PUT | `/api/templates/{id}` | Save a new revision without changing bound runs |
+| GET | `/api/templates/{id}/revisions[/{revision}]` | Read immutable past revisions |
+| GET | `/api/repositories` | List registered IDs and public metadata, without host paths |
+| POST / GET | `/api/runs` | Idempotent preflight create with stable `request_id` / own history |
+| GET | `/api/runs/{id}` | Own run, steps, cleanup and release state |
+| POST | `/api/runs/{id}/cancel` | Request cooperative cancellation |
+| POST | `/api/runs/{id}/approve` | Approve exact tag creation target |
+| GET | `/api/runs/{id}/artifacts/{name}` | Digest-checked binary download |
+| GET | `/api/tool-connections/status` | Redacted connection availability |
 
-See the[Python API](interface-tree.md). No queue, task database, MCP, LLM agent, production multi-tenancy, full PTY, hours-long durability or shell recovery across restarts is provided. Docker/runc is not strong hostile-code isolation.
+Older `/api/tasks` and `/api/sessions` remain. Runs use same-UID private directories and atomic JSON/artifact files under `$CHATARCH_HOME/chattask`; this is not a multi-tenant database. Restart marks unfinished or in-flight writes interrupted and requires manual reconciliation of the real Sandbox or remote target; it never replays uncertain writes. Login sessions and persistent Shell do not survive restart.

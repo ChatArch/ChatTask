@@ -2,15 +2,12 @@
 
 | 能力 | 当前实现 | 边界 |
 |---|---|---|
-| 一次性Task | TaskService.once：新建→写程序/测试→执行→返回→销毁 | 固定整数统计，不是自由文本Agent |
-| 持续Bash | open_session/run_session/close_session | 同一Sandbox+Shell，两层身份；最多5分钟逻辑会话 |
-| 运行态回收 | sweep、shutdown、容器/端口校验 | 只拥有本服务创建的环境；底层TTL最多10分钟 |
-| Python复用 | TaskSettings、TaskService、create_app、state_paths | import无连接/安装/服务启动副作用 |
-| 认证Web/API | 包内静态资产、ChatLogin、Origin+CSRF | 受信单用户，内存登录会话 |
-| 配置 | ChatEnv ChatTask typed profile | key/口令敏感；命名profile不全局激活 |
-| CLI | serve、paths、version、两种tree | 不伪造注册/任务队列命令 |
-| 环境setup | 复用ChatUp和已有OpenSandbox部署 | 不在业务调用中安装或重启宿主基础设施 |
+| 模板与仓库 | 内置 Python 发布模板、自定义声明式修订、CLI 登记受信 Git 根 | 网页不能提交路径/URL/任意宿主命令；脏源与跟踪的私密配置被拒绝 |
+| 持久运行 | 私有原子 JSON、幂等请求 ID、所有者绑定、步骤回执、重启标记 | 同 UID 信任；中断不自动重放；不是分布式队列 |
+| Sandbox 预检 | 跟踪源码归档、真实测试/构建/Twine 检查、wheel/sdist 读回与 SHA256、销毁核验 | 项目代码仅在 Sandbox；600 秒后端 TTL，步骤与总时限有限 |
+| ChatPyPI 工具 | 复用 PyPI 命名配置及 ChatAuth TokenStore；有限制、无重定向的异步 REST | 初始只调用 `pkg_probe`；退出码 1 可以是名称已占用，不是 HTTP 故障 |
+| 发布批准 | 精确目标确认、已合并 PR/精确检查/默认分支/标签目标核验 | 创建标签后只标为等待 OIDC/PyPI 验证，不声称已发布；未知写入须核对 |
+| 网页 | ChatLogin/Origin/CSRF、进度/历史/取消/摘要下载、Sandbox 实验主导航 | 失效登录清空受保护状态；暂时失败保留过期视图提示 |
+| 旧 Sandbox 实验 | 固定整数统计与持续 Shell、显式回收 | Shell 与登录会话不跨重启恢复 |
 
-不提供：完整PTY、数据库任务账本、MCP、自然语言Agent、强对抗隔离、多租户授权、数小时耐久或重启恢复Shell。Web自动运行清理循环；直接使用Python持续会话时，调用方应管理sweep和显式shutdown。
-
-运行兼容性与隔离强度是不同问题。普通Docker/runc不应作为公开匿名代码执行服务。
+普通 Docker/runc 不等于强对抗隔离。真实部署、供应方与浏览器验收在源码测试之外。

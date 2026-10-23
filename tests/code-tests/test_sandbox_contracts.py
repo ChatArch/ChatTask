@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import unittest
+import tempfile
 from unittest.mock import patch
 
 import httpx
@@ -65,8 +66,11 @@ class FakeService:
 class WebAuthTests(unittest.TestCase):
     def setUp(self):
         from chattask import TaskSettings,create_app
+        self.scratch=tempfile.TemporaryDirectory(dir=os.environ.get('CHATTASK_TEST_SCRATCH'))
+        self.addCleanup(self.scratch.cleanup)
         self.settings=TaskSettings(endpoint='http://127.0.0.1:12345',api_key='fixture-only-key',
-                                   origin='http://testserver',username='fixture-user',password='fixture-test-password')
+                                   origin='http://testserver',username='fixture-user',password='fixture-test-password',
+                                   home=self.scratch.name)
         self.service=FakeService()
         with patch('docker.from_env',side_effect=AssertionError('unexpected Docker connection')):
             self.app=create_app(self.settings,service=self.service)

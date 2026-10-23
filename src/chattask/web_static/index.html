@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Task / Sandbox — 实验台</title>
+  <title>Task Templates / Sandbox — 任务实验台</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
@@ -11,11 +11,67 @@
   <div class="grain" aria-hidden="true"></div>
   <main class="shell">
     <header class="masthead">
-      <div class="eyebrow"><span class="signal"></span> SANDBOX / TASK LAB <span class="slash">/</span> 01 <span class="account-controls"><span id="account-state">正在确认登录…</span> <button id="logout" type="button">退出登录</button></span></div>
-      <h1>任务进入，<em>环境启动。</em></h1>
-      <p class="intro">每次任务都在一个新 Sandbox 里运行，得到真实结果后回收；或者保留一个环境，分几步继续操作。</p>
-      <div class="note"><strong>实验边界</strong><span>登录后可操作 · 单用户实验 · Docker/runc 功能验证，不面向不可信代码；会话 5 分钟后回收</span></div>
+      <div class="eyebrow"><span class="signal"></span> TASK TEMPLATES / SANDBOX LAB <span class="slash">/</span> 01 <span class="account-controls"><span id="account-state">正在确认登录…</span> <button id="logout" type="button">退出登录</button></span></div>
+      <h1>从模板出发，<em>把结果交到手中。</em></h1>
+      <p class="intro">选择受信仓库和版本，先运行真实的检查与构建；每一步、每份产物和清理结果都可查看。旧有 Sandbox 实验仍可在下方切换。</p>
+      <div class="note"><strong>实验边界</strong><span>登录后可操作 · 仓库由管理员登记 · 默认只执行预检 · 发布标签必须再次明确批准</span></div>
     </header>
+
+    <nav class="primary-nav" aria-label="主要功能">
+      <button id="templates-tab" type="button" aria-controls="template-view" aria-selected="true">任务模板 <span>Templates</span></button>
+      <button id="sandbox-tab" type="button" aria-controls="sandbox-view" aria-selected="false">Sandbox 实验 <span>Experiments</span></button>
+    </nav>
+    <section id="template-view" aria-label="任务模板">
+      <div class="template-grid">
+        <section class="panel template-panel" aria-labelledby="template-title">
+          <div class="panel-no">01 <span>配置预检</span></div>
+          <h2 id="template-title">选择模板，运行真实检查。</h2>
+          <p id="template-description">正在读取模板…</p>
+          <label for="template-picker">任务模板</label>
+          <select id="template-picker"></select>
+          <label for="repository-picker">受信仓库</label>
+          <select id="repository-picker"></select>
+          <div class="form-grid">
+            <div><label for="target-version">目标版本</label><input id="target-version" placeholder="1.2.3" autocomplete="off"></div>
+            <div><label for="pull-request">已合并 PR 编号 <span class="hint">发布时必需</span></label><input id="pull-request" type="number" min="1" step="1" placeholder="可在预检时留空"></div>
+          </div>
+          <label for="install-extras">测试依赖 extras <span class="hint">可选，例如 web,dev；仅在 Sandbox 安装</span></label>
+          <input id="install-extras" placeholder="web,dev" autocomplete="off">
+          <button id="create-run" class="primary-action" type="button">创建并执行预检 ↗</button>
+          <div id="tool-state" class="meta-note">正在检查工具连接…</div>
+          <div id="create-state" class="status" role="status" aria-live="polite">尚未创建任务</div>
+          <details class="custom-template"><summary>从内置模板创建自定义版本</summary>
+            <p>只调整允许的检查步骤；所有命令仍由服务端固定执行于 Sandbox。</p>
+            <div class="form-grid"><div><label for="custom-id">模板 ID</label><input id="custom-id" placeholder="my-release"></div><div><label for="custom-name">名称</label><input id="custom-name" placeholder="我的发布检查"></div></div>
+            <label for="custom-description">说明</label><input id="custom-description" placeholder="适用场景与检查说明">
+            <div class="step-options"><label><input id="step-probe" type="checkbox" checked> PyPI 名称探测</label><label><input id="step-test" type="checkbox" checked> 测试</label><label><input id="step-build" type="checkbox" checked> 构建</label><label><input id="step-check" type="checkbox" checked> 分发包检查</label></div>
+            <label for="test-suite">测试方式</label><select id="test-suite"><option value="pytest">pytest</option><option value="unittest">unittest</option><option value="compileall">compileall（仅语法检查）</option></select>
+            <button id="save-template" class="secondary-action" type="button">保存自定义模板</button>
+            <div id="template-state" class="status" role="status" aria-live="polite"></div>
+          </details>
+        </section>
+        <section class="panel dark run-panel" aria-labelledby="run-title">
+          <div class="panel-no">02 <span>进度与结果</span></div>
+          <h2 id="run-title">每一步都有凭据。</h2>
+          <div class="history-line"><label for="run-history">历史任务</label><select id="run-history"><option value="">选择任务</option></select><button id="refresh-run" class="subtle" type="button">刷新</button></div>
+          <div id="run-state" class="status" role="status" aria-live="polite">选择或创建一个任务以查看结果。</div>
+          <div id="run-summary" class="run-summary"></div>
+          <ol id="run-steps" class="run-steps"></ol>
+          <div id="artifact-list" class="artifact-list"></div>
+          <div class="approval-box" id="approval-box" hidden>
+            <h3>批准创建发布标签</h3>
+            <p>这会在已合并 PR 和精确 HEAD 检查通过后创建 GitHub 标签，并触发仓库的 OIDC 发布工作流。标签不等于 PyPI 已发布。</p>
+            <div id="approval-target" class="approval-target"></div>
+            <label for="approval-confirmation">手动输入上方的完整确认文字</label>
+            <input id="approval-confirmation" autocomplete="off" spellcheck="false" placeholder="不会自动填写">
+            <button id="approve-run" class="primary-action" type="button" disabled>批准创建标签</button>
+          </div>
+          <button id="cancel-run" class="secondary-action" type="button" hidden>请求取消运行</button>
+          <div id="run-error" class="status" role="status" aria-live="polite"></div>
+        </section>
+      </div>
+    </section>
+    <section id="sandbox-view" aria-label="Sandbox 实验" hidden>
     <div class="columns">
       <section class="panel" aria-labelledby="once-title">
         <div class="panel-no">01 <span>一次性 Task</span></div>
@@ -38,7 +94,8 @@
         <pre id="session-output" class="output" aria-label="持续会话输出">先创建会话，再发送命令。</pre>
       </section>
     </div>
-    <footer><span>任务流程：create → write → exec → test → destroy</span><span>会话流程：create → command × N → destroy</span></footer>
+    </section>
+    <footer><span>模板流程：snapshot → probe → test → build → check → approval</span><span>Sandbox 实验：create → exec → destroy</span></footer>
   </main>
 </body>
 </html>

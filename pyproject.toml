@@ -9,7 +9,7 @@ description = "ChatTask: a ChatArch Python package."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-dependencies = ["click>=8.0,<9.0", "chatstyle>=0.2.0,<0.3.0", "chatenv>=0.2.15,<0.3.0", "opensandbox==1.1.0", "docker>=7,<8", "httpx>=0.28,<0.29"]
+dependencies = ["click>=8.0,<9.0", "chatstyle>=0.2.0,<0.3.0", "chatenv>=0.2.15,<0.3.0", "opensandbox==1.1.0", "docker>=7,<8", "httpx>=0.28,<0.29", "packaging>=24,<27"]
 authors = [{name = "ChatArch", email = "rex@chatarch.org"}]
 keywords = ["chattask", "chatarch", "cli"]
 classifiers = [
@@ -27,7 +27,7 @@ chattask = "chattask.cli:main"
 
 [project.optional-dependencies]
 dev = ["build", "pytest", "twine"]
-web = ["fastapi>=0.133,<0.143", "uvicorn>=0.41,<0.55", "ChatLogin[web]>=0.2.0,<0.3.0"]
+web = ["fastapi>=0.133,<0.143", "uvicorn>=0.41,<0.55", "ChatLogin[web]>=0.2.0,<0.3.0", "ChatPyPI>=0.2.14,<0.3.0", "ChatGH>=0.2.14,<0.3.0"]
 docs = ["mkdocs>=1.6,<2.0", "mkdocs-material>=9.5,<9.7", "mkdocs-static-i18n>=1.2,<2.0", "mike>=2.0,<3.0"]
 
 [project.entry-points."chatenv.configs"]

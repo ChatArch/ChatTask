@@ -42,7 +42,8 @@ def test_deploy_replaces_production_and_preserves_existing_preview(tmp_path, wit
         (repo / "obsolete.html").write_text("obsolete production")
         git("add", "dev", "versions.json", "obsolete.html")
         git("commit", "-m", "published docs")
-        git("push", "origin", "gh-pages")
+        subprocess.run(['git', '--git-dir', str(remote), 'fetch', str(repo),
+                        'refs/heads/gh-pages:refs/heads/gh-pages'], check=True, capture_output=True)
         git("switch", "main")
     tools = tmp_path / "bin"
     tools.mkdir()

@@ -1,54 +1,31 @@
 # Python API
 
-CLI and Web share one service; consumers do not shell out to the CLI.
+CLI and Web share importable business APIs. `import chattask` itself does not connect Docker, read tokens, create state or start services.
 
 ```text
 chattask
-├── TaskSettings
-├── TaskService
+├── TaskSettings / settings.load_settings(profile=..., home=...)
+├── TaskService                    # Existing integer task and persistent Shell
 │   ├── once(values)
-│   ├── open_session()
-│   ├── run_session(id, command)
-│   ├── close_session(id)
-│   ├── sweep()
-│   └── shutdown()
-├── create_app(settings, service=...)
-├── state_paths(home=...)
-└── settings.load_settings(profile=..., home=..., overrides=...)
+│   ├── open_session() / run_session(id, command) / close_session(id)
+│   └── sweep() / shutdown()
+├── TaskStore(root)                # Private atomic template/repository/run/artifact store
+├── WorkflowService(store, source=..., executor=..., tool_client=..., release_adapter=...)
+│   ├── templates() / save_template(spec, update=False)
+│   ├── register_repository(id, path, github_repo, default_branch, package_name)
+│   ├── create_run(owner, body) / get_run(owner, id) / list_runs(owner)
+│   ├── cancel(owner, id) / approve(owner, id, exact_body) / artifact(owner, id, name)
+│   └── recover() / shutdown()
+├── source.GitSource               # Clean Git root/tracked archive/pinned SHA
+├── executor.SandboxExecutor       # Real OpenSandbox execution and independent cleanup check
+├── tool_client.ChatPyPITools      # PyPI named profile / ChatAuth TokenStore / REST
+├── release.ChatGHReleaseAdapter   # Merged PR, checks, tag write/reconciliation
+├── create_app(settings, service=..., workflow=...)
+└── state_paths(home=...)
 ```
 
-## One-shot library call
+`WorkflowService.create_run` accepts `request_id`, `repository_id`, `template_id`, `version` and optional `install_extras` (up to four simple names) and `pull_request`. Web derives the authenticated owner on the server; the browser cannot supply owner or host path. The built-in template ID is `python-release`. Custom steps are limited to `probe`, `test` (`pytest` / `unittest` / `compileall`), `build` and `check`; `check` must follow `build`. Existing runs keep their bound step snapshot after a new template revision.
 
-Configure the profile using the[integration guide](index.md), then:
+`approve` accepts an exact dictionary only when a run is `awaiting_approval`: `action=tag`, matching `repository_id`, `version`, `source_sha` and `confirmation=TAG owner/repo vVERSION`. Outcomes include `blocked`, `release_unknown` and `awaiting_publication`; the latter is not publication. Artifact downloads recheck byte size and SHA256.
 
-```python
-import asyncio
-from chattask import TaskService
-from chattask.settings import load_settings
-
-async def main():
-    service = TaskService(load_settings(profile='site'))
-    try:
-        result = await service.once([2, 4, 6])
-        print(result['result'])
-        assert result['cleanup']['container_absent']
-    finally:
-        await service.shutdown()
-
-asyncio.run(main())
-```
-
-## Explicit application factory
-
-```python
-from chattask import create_app
-from chattask.settings import load_settings
-
-app = create_app(load_settings(profile='site'))
-```
-
-Import does not connect to Docker/control planes, install dependencies, start services or create state. Explicit service/application construction may initialize required clients. The factory uses ChatLogin and has no anonymous execution mode.
-
-Web lifespan owns sweep/shutdown. Direct Python long-session consumers must manage expiry sweep and explicit shutdown. A browser disconnect is not destruction; explicit close, logical expiry and underlying TTL are distinct.
-
-OpenSandbox is the only implemented backend. Do not claim other backends merely because an adapter can be added. `once` returns program/test exit codes, output, runtime checks and cleanup evidence; HTTP200 alone is not operation success.
+The Web lifespan marks recovery and explicitly shuts down. Direct long-lived Python callers should manage both methods. Production dependency connections happen after explicit construction/invocation; offline source tests inject synthetic clients and temporary stores.

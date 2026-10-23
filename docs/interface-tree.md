@@ -1,54 +1,31 @@
 # Python 接口
 
-CLI和Web都复用同一服务层；不需要shell out到chattask。
+CLI 和 Web 复用可导入的业务层；导入 `chattask` 本身不连接 Docker、读取令牌、建目录或启动服务。
 
 ```text
 chattask
-├── TaskSettings                  # 显式连接、镜像、Web与认证设置
-├── TaskService
-│   ├── once(values)              # 新环境执行固定统计程序并回收
-│   ├── open_session()            # 创建Sandbox+持久Bash
-│   ├── run_session(id, command)  # 在同一个Shell内执行
-│   ├── close_session(id)         # 显式销毁本会话
-│   ├── sweep()                   # 调用方管理的过期清理循环
-│   └── shutdown()                # 关闭本服务拥有的会话与Docker客户端
-├── create_app(settings, service=...)  # 可注入服务的FastAPI工厂
-├── state_paths(home=...)         # 无创建副作用的路径解析
-└── settings.load_settings(profile=..., home=..., overrides=...)
+├── TaskSettings / settings.load_settings(profile=..., home=...)
+├── TaskService                    # 旧整数 Task 与持续 Shell
+│   ├── once(values)
+│   ├── open_session() / run_session(id, command) / close_session(id)
+│   └── sweep() / shutdown()
+├── TaskStore(root)                # 私有原子模板/仓库/运行/产物存储
+├── WorkflowService(store, source=..., executor=..., tool_client=..., release_adapter=...)
+│   ├── templates() / save_template(spec, update=False)
+│   ├── register_repository(id, path, github_repo, default_branch, package_name)
+│   ├── create_run(owner, body) / get_run(owner, id) / list_runs(owner)
+│   ├── cancel(owner, id) / approve(owner, id, exact_body) / artifact(owner, id, name)
+│   └── recover() / shutdown()
+├── source.GitSource               # 干净 Git 根/跟踪归档/固定 SHA
+├── executor.SandboxExecutor       # OpenSandbox 真执行与独立清理核验
+├── tool_client.ChatPyPITools      # PyPI 命名 profile / ChatAuth TokenStore / REST
+├── release.ChatGHReleaseAdapter   # 已合并 PR、检查、标签写入/核对
+├── create_app(settings, service=..., workflow=...)
+└── state_paths(home=...)
 ```
 
-## Python一次性调用
+`WorkflowService.create_run` 接受 `request_id`、`repository_id`、`template_id`、`version`，以及可选 `install_extras`（最多四个简单名称）和 `pull_request`。认证所有者由 Web 服务端传入；浏览器不能指定所有者或宿主路径。内置模板 ID 是 `python-release`。自定义模板允许的步骤为 `probe`、`test`（`pytest` / `unittest` / `compileall`）、`build`、`check`；`check` 必须在 `build` 后。修订后已创建运行仍绑定旧步骤快照。
 
-先按[快速接入](index.md)建立profile：
+`approve` 只接受运行处于 `awaiting_approval` 时的精确字典：`action=tag`、同一 `repository_id`、`version`、`source_sha`、`confirmation=TAG owner/repo vVERSION`。结果可能是 `blocked`、`release_unknown` 或 `awaiting_publication`，后者不代表包已发布。产物下载会再次核对字节大小和 SHA256。
 
-```python
-import asyncio
-from chattask import TaskService
-from chattask.settings import load_settings
-
-async def main():
-    service = TaskService(load_settings(profile='site'))
-    try:
-        result = await service.once([2, 4, 6])
-        print(result['result'])
-        assert result['cleanup']['container_absent']
-    finally:
-        await service.shutdown()
-
-asyncio.run(main())
-```
-
-## 显式应用工厂
-
-```python
-from chattask import create_app
-from chattask.settings import load_settings
-
-app = create_app(load_settings(profile='site'))
-```
-
-`import chattask`不连接Docker/控制面、不安装依赖、不启动服务、不创建运行态。`TaskService(...)`与`create_app(...)`是显式构造，可能建立其所需客户端。工厂默认启用ChatLogin，不存在匿名执行模式。
-
-Web lifespan管理sweep和shutdown；直接Python长期会话调用方应管理这两者。浏览器断开不等于销毁Sandbox；显式关闭、逻辑过期与底层TTL是不同层次。
-
-当前唯一后端是OpenSandbox，不能把“接口可扩展”说成已经实现多个后端。`TaskService.once`返回程序/测试退出码、输出、运行态验证与cleanup证据，不把HTTP200直接等同于业务成功。
+Web lifespan负责恢复标记和显式关闭。直接使用 Python 长期会话或工作流的调用方也应管理这两个方法。所有生产依赖连接在显式构造/调用后才发生；源码离线测试使用注入的合成客户端与临时存储。

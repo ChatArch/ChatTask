@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-ChatTask adds reusable task templates, trusted Git snapshots, real Sandbox preflight, durable runs and explicit release approval while preserving the integer-statistics task and persistent Shell experiment. This is an **unreleased 0.1.0.dev0 candidate**; published PyPI 0.0.2 is still the old scaffold.
+Starting with 0.1.0, ChatTask adds reusable task templates, trusted Git snapshots, real Sandbox preflight, durable runs and explicit release approval while preserving the integer-statistics task and persistent Shell experiment. Historical 0.0.2 is only a scaffold; check the actual PyPI and installed `chattask --version` before relying on these capabilities.
 
 - **Templates**: a built-in Python package release preflight and versioned custom templates limited to approved probe, test, build and check steps.
 - **Real execution**: an operator registers a clean Git root; a run binds HEAD. Only tracked source enters an owned Sandbox. Actual exit codes, logs, wheel/sdist hashes and independently checked cleanup are recorded.

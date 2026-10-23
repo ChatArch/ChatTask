@@ -1,6 +1,6 @@
 # CLI tree
 
-These are the registered candidate commands observed with `chattask --tree`.
+These are the registered commands observed with `chattask --tree`.
 
 ```text
 chattask

@@ -1,6 +1,6 @@
 # ChatTask integration
 
-This is unreleased 0.1.0.dev0 source, not functionality of published PyPI 0.0.2. The older integer-statistics task and persistent Shell experiment remain in the primary navigation.
+These template capabilities start in ChatTask 0.1.0; historical PyPI 0.0.2 is only a CLI scaffold. Check the actual PyPI version before installing. The older integer-statistics task and persistent Shell experiment remain in the primary navigation.
 
 ## Architecture and prerequisites
 

@@ -52,8 +52,20 @@ target_evidence='Live scoped PyPI probe SHA256 '+hashlib.sha256(json.dumps(probe
 if spec['mode']=='existing':
  target_evidence+='; exact GitHub snapshot '+snapshot['sha']
 receipts={}
+def rebuilt_registration_artifacts(directory):
+ result=[]
+ for artifact in sorted(directory.iterdir()):
+  if not artifact.is_file() or not artifact.name.endswith(('.whl','.tar.gz')):continue
+  data=artifact.read_bytes()
+  if len(data)>5*1024*1024:raise SystemExit('registration distribution too large')
+  result.append({'filename':artifact.name,'content_base64':base64.b64encode(data).decode(),'sha256':hashlib.sha256(data).hexdigest()})
+ if len(result)!=2:raise SystemExit('rebuilt registration wheel and sdist required')
+ return result
 def run(argv,cwd,limit,label):
- result=subprocess.run(argv,cwd=cwd,capture_output=True,text=True,timeout=limit,env={**os.environ,'PYTHONPATH':str(cwd/'src')})
+ allowed=('PATH','HOME','SSL_CERT_FILE','REQUESTS_CA_BUNDLE','CODEX_CA_CERTIFICATE')
+ env={key:os.environ[key] for key in allowed if key in os.environ}
+ env.update(PYTHONPATH=str(cwd/'src'),PIP_CONFIG_FILE='/dev/null',PIP_DISABLE_PIP_VERSION_CHECK='1',PYTHONNOUSERSITE='1')
+ result=subprocess.run(argv,cwd=cwd,capture_output=True,text=True,timeout=limit,env=env)
  log=(result.stdout+'\n'+result.stderr)[-200000:]
  (root/(label+'.log')).write_text(log)
  if result.returncode or 'Ran 0 tests' in log or 'no tests ran' in log.lower():
@@ -97,12 +109,13 @@ for branch,entry in plan['sources'].items():
     metadata=z.read(names[0]).decode()
   else:
    with tarfile.open(artifact,'r:gz') as z:
-    names=[x for x in z.getnames() if x.endswith('/PKG-INFO')]
+    names=[x for x in z.getnames() if x.endswith('/PKG-INFO') and x.count('/')==1]
     if len(names)!=1:raise SystemExit('sdist metadata missing')
     metadata=z.extractfile(names[0]).read(50000).decode()
   if not re.search(r'^Name: '+re.escape(spec['package_name'])+r'$',metadata,re.M|re.I) or not re.search(r'^Version: '+re.escape(version)+r'$',metadata,re.M):
    raise SystemExit('distribution metadata mismatch')
  receipts[branch]={'tests_sha256':test_hash,'build_sha256':build_hash,'wheel_sdist':sorted(x.name for x in dist)}
+ if branch=='main':plan['placeholder_artifacts']=rebuilt_registration_artifacts(dest/'dist')
 validation=plan.get('validation',{})
 validation['tools']={'status':'passed','evidence':'Read-only scoped tool catalog and probe completed in Sandbox'}
 validation['target']={'status':'passed','evidence':target_evidence}

@@ -97,7 +97,8 @@ class PackageService:
             draft={**draft,'prepare_status':draft.get('prepare_status',prep['status'])}
         if draft.get('publish_task_id'):
             task=self.tasks.get(owner,draft['publish_task_id'])
-            draft={**draft,'publish_status':task['status'],'publish_result':task.get('result'),'publish_error':task.get('error')}
+            verified=task['status']=='completed' and any(item.get('name')=='trusted-publication.json' for item in task.get('artifacts',[]))
+            draft={**draft,'publish_status':task['status'],'publish_result':task.get('result'),'publish_error':task.get('error'),'publish_verified':verified}
         return self._public(draft)
 
     async def create(self,owner,body):

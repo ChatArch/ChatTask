@@ -64,32 +64,58 @@ def _distribution(filename,data,spec,main_files):
             raise ValueError('placeholder wheel filename mismatch')
         with zipfile.ZipFile(io.BytesIO(data)) as wheel:
             members=wheel.infolist()
-            if len(members)>200 or sum(x.file_size for x in members)>5*1024*1024 or any(stat.S_ISLNK(x.external_attr>>16) or x.filename.startswith('/') or any(p in ('','.', '..') for p in x.filename.rstrip('/').split('/')) for x in members):
+            if len(members)>200 or len({x.filename for x in members})!=len(members) or sum(x.file_size for x in members)>5*1024*1024 or any(stat.S_ISLNK(x.external_attr>>16) or x.filename.startswith('/') or any(p in ('','.', '..') for p in x.filename.rstrip('/').split('/')) for x in members):
                 raise ValueError('unsafe wheel contents')
             matches=[x for x in members if x.filename.endswith('.dist-info/METADATA')]
             if len(matches)!=1:
                 raise ValueError('wheel metadata missing')
             metadata=wheel.read(matches[0]).decode('utf-8')
-            expected={path[4:]:body for path,body in main_files.items() if path.startswith('src/'+spec['module']+'/') and path.endswith('.py')}
+            expected={path[4:]:body for path,body in main_files.items() if path.startswith('src/'+spec['module']+'/')}
             if not expected or any(name not in wheel.namelist() or wheel.read(name)!=body for name,body in expected.items()):
                 raise ValueError('placeholder wheel differs from main source')
-            if set(name for name in wheel.namelist() if name.endswith('.py'))!=set(expected) or any(name.endswith('.pth') for name in wheel.namelist()):
-                raise ValueError('placeholder wheel has extra package code')
+            metadata_root=matches[0].filename.rsplit('/',1)[0]+'/'
+            payload={item.filename for item in members if not item.is_dir() and not item.filename.startswith(metadata_root)}
+            if payload!=set(expected) or any(name.endswith('.pth') for name in wheel.namelist()):
+                raise ValueError('placeholder wheel has unreviewed executable or data content')
+            for item in members:
+                if item.is_dir() or not item.filename.startswith(metadata_root):continue
+                relative=item.filename[len(metadata_root):]
+                if relative in ('METADATA','WHEEL','RECORD','entry_points.txt','top_level.txt'):continue
+                if relative.startswith('licenses/'):
+                    source=relative.removeprefix('licenses/')
+                    if source in main_files and wheel.read(item)==main_files[source]:continue
+                raise ValueError('placeholder wheel contains unbound metadata content')
     elif filename.endswith('.tar.gz'):
-        if not filename.lower().startswith(spec['package_name'].lower()+'-'+version):
+        from packaging.utils import parse_sdist_filename,canonicalize_name
+        try:distribution,parsed_version=parse_sdist_filename(filename)
+        except ValueError:raise ValueError('placeholder sdist filename mismatch') from None
+        if distribution!=canonicalize_name(spec['package_name']) or str(parsed_version)!=version:
             raise ValueError('placeholder sdist filename mismatch')
         with tarfile.open(fileobj=io.BytesIO(data),mode='r:gz') as archive:
             members=archive.getmembers()
-            if len(members)>200 or sum(x.size for x in members)>5*1024*1024 or any(not (x.isfile() or x.isdir()) or x.name.startswith('/') or any(p in ('','.', '..') for p in x.name.rstrip('/').split('/')) for x in members):
+            if len(members)>200 or len({x.name for x in members})!=len(members) or sum(x.size for x in members)>5*1024*1024 or any(not (x.isfile() or x.isdir()) or x.name.startswith('/') or any(p in ('','.', '..') for p in x.name.rstrip('/').split('/')) for x in members):
                 raise ValueError('unsafe sdist contents')
-            matches=[x for x in members if x.name.endswith('/PKG-INFO')]
+            matches=[x for x in members if x.name.endswith('/PKG-INFO') and x.name.count('/')==1]
             if len(matches)!=1:
                 raise ValueError('sdist metadata missing')
             metadata=archive.extractfile(matches[0]).read(50000).decode('utf-8')
-            expected={path:body for path,body in main_files.items() if path=='pyproject.toml' or path.startswith('src/'+spec['module']+'/') and path.endswith('.py')}
+            expected={path:body for path,body in main_files.items() if path=='pyproject.toml' or path.startswith('src/'+spec['module']+'/')}
+            roots={m.name.split('/',1)[0] for m in members}
+            if len(roots)!=1:raise ValueError('sdist has multiple roots')
+            egg=re.sub(r'[-_.]+','_',spec['package_name']).lower()+'.egg-info/'
             for member in members:
-                if member.isfile() and member.name.endswith('.py') and not any(member.name.endswith('/'+path) for path in main_files if path.endswith('.py')):
-                    raise ValueError('placeholder sdist has extra code')
+                if not member.isfile():continue
+                relative=member.name.split('/',1)[1] if '/' in member.name else ''
+                content=archive.extractfile(member).read()
+                if relative in main_files and content==main_files[relative]:continue
+                if relative=='PKG-INFO':continue
+                lower=relative.lower()
+                if lower.startswith('src/'+egg) and lower.removeprefix('src/'+egg) in ('pkg-info','sources.txt','requires.txt','dependency_links.txt','entry_points.txt','top_level.txt','zip-safe','not-zip-safe'):continue
+                if relative=='setup.cfg':
+                    import configparser
+                    config=configparser.ConfigParser(interpolation=None);config.read_string(content.decode())
+                    if config.sections()==['egg_info'] and dict(config['egg_info'])=={'tag_build':'','tag_date':'0'}:continue
+                raise ValueError('placeholder sdist contains unreviewed content')
             for path,body in expected.items():
                 found=[m for m in members if m.name.endswith('/'+path)]
                 if len(found)!=1 or archive.extractfile(found[0]).read()!=body:
@@ -119,6 +145,41 @@ def _declared_version(project,document,files,module):
 
 def manifest_digest(files):
     return hashlib.sha256(json.dumps(sorted((f['path'],f['sha256']) for f in files),separators=(',',':')).encode()).hexdigest()
+
+def _workflow_contract(files):
+    import yaml
+    for path in ['.github/workflows/ci.yml','.github/workflows/publish.yml']:
+        if path not in files:raise ValueError('exact standard CI/publish.yml workflows required')
+    ci=yaml.safe_load(files['.github/workflows/ci.yml'])
+    if not isinstance(ci,dict) or ci.get('name')!='CI':raise ValueError('project CI workflow must be named CI')
+    events=ci.get('on',ci.get(True))
+    event_names=set(events) if isinstance(events,(dict,list)) else {events}
+    job=(ci.get('jobs') or {}).get('test')
+    if not {'push','pull_request'}<=event_names or not isinstance(job,dict) or job.get('name','test')!='test' or 'matrix' in (job.get('strategy') or {}) and 'name' not in job:
+        raise ValueError('exact project test check and PR/main CI triggers required')
+    text=files['.github/workflows/publish.yml'].decode('utf-8')
+    # Match the deployed tag gate before any irreversible name registration.
+    if not all(value in text for value in ['id-token: write','pypa/gh-action-pypi-publish','on:\n  push:\n    tags:','v*']):
+        raise ValueError('deployed tag-only OIDC workflow contract missing')
+    publish=yaml.safe_load(text)
+    if not isinstance(publish,dict):raise ValueError('invalid publish workflow')
+    trigger=publish.get('on',publish.get(True))
+    if not isinstance(trigger,dict) or set(trigger)!={'push'} or not isinstance(trigger['push'],dict) or set(trigger['push'])!={'tags'} or not isinstance(trigger['push']['tags'],list) or 'v*' not in trigger['push']['tags']:
+        raise ValueError('publish.yml must be tag-push only')
+    candidates=[]
+    for name,definition in (publish.get('jobs') or {}).items():
+        if not isinstance(definition,dict):raise ValueError('invalid publish job')
+        steps=definition.get('steps',[])
+        for step in steps:
+            if not isinstance(step,dict):raise ValueError('invalid publish step')
+            if step.get('uses')=='pypa/gh-action-pypi-publish@release/v1':
+                permissions=definition.get('permissions',publish.get('permissions',{}))
+                label=step.get('name') or 'Run '+step['uses']
+                labels=[s.get('name') or 'Run '+s.get('uses','') for s in steps]
+                if not isinstance(permissions,dict) or permissions.get('id-token')!='write' or labels.count(label)!=1 or definition.get('strategy'):
+                    raise ValueError('unambiguous OIDC upload step and permission required')
+                candidates.append((name,label))
+    if len(candidates)!=1:raise ValueError('exactly one standard PyPI publish action required')
 
 def _verify_plan(archive_bytes,spec):
     if not isinstance(archive_bytes,bytes) or len(archive_bytes)>20*1024*1024:
@@ -176,12 +237,7 @@ def _verify_plan(archive_bytes,spec):
             raise ValueError('CLI metadata mismatch')
         if spec['docs']=='bilingual_mkdocs' and not ('mkdocs.yml' in found and any(x.startswith('docs/en/') for x in found) and any(x.startswith('docs/zh/') for x in found)):
             raise ValueError('bilingual MkDocs source missing')
-        workflows=[path for path in found if path.startswith('.github/workflows/') and path.endswith(('.yml','.yaml'))]
-        if not any('publish' in x for x in workflows) or not any('ci' in x or 'test' in x for x in workflows):
-            raise ValueError('standard CI/OIDC workflow files required')
-        publish=b'\n'.join(found[x] for x in workflows if 'publish' in x)
-        if b'id-token: write' not in publish or b'pypa/gh-action-pypi-publish' not in publish:
-            raise ValueError('OIDC publish workflow shape mismatch')
+        _workflow_contract(found)
         digests[branch]={'digest':manifest_digest(files),'base_sha':base}
         source_bytes[branch]=found
     artifacts=plan['placeholder_artifacts']

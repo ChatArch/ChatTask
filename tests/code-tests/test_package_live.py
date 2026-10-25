@@ -62,8 +62,8 @@ class PackageLiveTests(unittest.TestCase):
         def branch(version):
             return {'base_sha':None,'files':[
                 file('pyproject.toml','[project]\nname = "demo-package"\nversion = "'+version+'"\nrequires-python = ">=3.10"\nlicense = "MIT"\n[project.scripts]\ndemo-package = "demo_package.cli:main"\n'),
-                file('.github/workflows/ci.yml','name: CI\non: [push]\n'),
-                file('.github/workflows/publish.yml','permissions:\n  id-token: write\nsteps:\n  uses: pypa/gh-action-pypi-publish@release/v1\n'),
+                file('.github/workflows/ci.yml','name: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: python -m pytest\n'),
+                file('.github/workflows/publish.yml','name: Publish\non:\n  push:\n    tags: ["v*"]\npermissions:\n  id-token: write\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Publish to PyPI\n        uses: pypa/gh-action-pypi-publish@release/v1\n'),
                 file('tests/test_demo.py','def test_demo(): assert True\n'),
                 file('src/demo_package/__init__.py','__version__ = "'+version+'"\n'),
                 file('mkdocs.yml','site_name: Demo\n'),

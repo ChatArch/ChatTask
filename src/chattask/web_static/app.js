@@ -637,8 +637,13 @@ function renderPackage(draft) {
     $('package-artifacts').append(download);
   }
   if (draft.prepare_error) show('package-state', '预检验证受阻：' + draft.prepare_error, true);
-  if (draft.publish_result) show('package-state', '任务结果：' + draft.publish_result);
-  else if (draft.publish_error) show('package-state', '发布任务受阻：' + draft.publish_error, true);
+  if (draft.publish_task_id) {
+    if (draft.publish_error || ['blocked','interrupted','cancelled'].includes(draft.publish_status)) {
+      show('package-state','发布核验未完成：' + (draft.publish_error || draft.publish_status) + '。模型摘要不能作为发布成功的依据。',true);
+    } else if (draft.publish_verified) show('package-state','发布完成，外部回执和干净安装核验已通过。');
+    else show('package-state','发布状态：' + draft.publish_status + '；仍需完整外部核验。');
+    if (draft.publish_result) $('package-preview').textContent += '\n\n模型执行摘要（不代表发布核验结果）：\n' + draft.publish_result;
+  }
   packageControls();
   if (packagePoll) clearTimeout(packagePoll);
   if (draft.prepare_task_id && !preview && ['queued','running','cancel_requested'].includes(draft.prepare_status))
@@ -701,7 +706,7 @@ async function initializePackages() {
     const match = /^#package=([a-f0-9]{32})$/.exec(location.hash);
     if (match) { await loadPackage(match[1]); $('package-tab').click(); }
     else fillPackage({...packageSchema.defaults,mode:'new'});
-    show('package-state', packagePending ? '上次操作结果未确认；重复相同按钮将使用原请求 ID。' : packageSchema.available ? '填写参数后保存草稿。' : '发包网关尚未配置；可填写草稿，预检与发布暂不可用。', !packageSchema.available);
+    if (!packageDraft?.publish_task_id && !packageDraft?.prepare_error) show('package-state', packagePending ? '上次操作结果未确认；重复相同按钮将使用原请求 ID。' : !packageSchema.available ? '发包网关尚未配置；可填写草稿，预检与发布暂不可用。' : packageDraft ? '已读取草稿与预检状态。' : '填写参数后保存草稿。', !packageSchema.available);
     packageControls();
   } catch (error) { show('package-state', error.message, true); }
 }

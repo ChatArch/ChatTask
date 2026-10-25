@@ -43,6 +43,12 @@ class ReviewRegressionTests(unittest.TestCase):
    data=b'Name: demo-package\nVersion: 0.0.1\n';member=tarfile.TarInfo('demo-package-0.0.1/src/demo_package.egg-info/PKG-INFO');member.size=len(data);target.addfile(member,io.BytesIO(data))
   raw=output.getvalue();item.update(content_base64=base64.b64encode(raw).decode(),sha256=hashlib.sha256(raw).hexdigest())
   self.assertEqual(verify_plan(self.archive(plan),spec)['artifact_digests'][item['filename']],item['sha256'])
+ def test_model_metadata_does_not_become_authoritative_validation(self):
+  spec,plan=self.plan();plan['validation'].update(ready=True,blockers=[],checks={'model_only':'not an attestation'})
+  checked=verify_plan(self.archive(plan),spec)
+  self.assertEqual(set(checked['validation']),{'tools','target','tests','build','metadata'})
+  from chattask.package_plan import trusted_checks
+  self.assertEqual(trusted_checks(plan['validation']),checked['validation'])
  def test_registration_artifacts_are_replaced_by_trusted_rebuild(self):
   from chattask.package_validation import PREPARE_VALIDATOR
   nodes=[n for n in ast.parse(PREPARE_VALIDATOR).body if isinstance(n,ast.FunctionDef) and n.name=='rebuilt_registration_artifacts']

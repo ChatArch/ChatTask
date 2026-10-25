@@ -6,7 +6,7 @@ import re
 import uuid
 from .workflow import now
 from .package_template import REVISION, REQUEST_ID, validate_spec, fingerprint, prepare_instructions, publish_instructions, policy
-from .package_plan import verify_plan
+from .package_plan import verify_plan, trusted_checks
 
 DRAFT_ID = re.compile(r'[a-f0-9]{32}\Z')
 def _digest(value):
@@ -70,7 +70,7 @@ class PackageService:
                     if len(att_bytes)!=att['size'] or hashlib.sha256(att_bytes).hexdigest()!=att['sha256']:
                         raise ValueError('trusted validation receipt digest mismatch')
                     evidence=json.loads(att_bytes)
-                    if evidence.get('plan_sha256')!=preview['plan_sha256'] or evidence.get('checks')!=preview['validation']:
+                    if evidence.get('plan_sha256')!=preview['plan_sha256'] or trusted_checks(evidence.get('checks'))!=preview['validation']:
                         raise ValueError('trusted validation does not bind the plan')
                     if set(evidence.get('branches',{}))!=set(preview['source_manifests']):
                         raise ValueError('trusted validation branch mismatch')

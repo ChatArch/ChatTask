@@ -229,6 +229,25 @@
   
   
   
+  
+    <li class="md-tabs__item">
+      <a href="../tasks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  通用任务与镜像
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
     
   
   
@@ -318,6 +337,28 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    通用任务与镜像
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -339,10 +380,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -355,8 +396,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_2">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             命令与接口
           </label>
@@ -490,7 +531,8 @@
   
 
 
-<h1 id="python">Python 接口<a class="headerlink" href="#python" title="Permanent link">&para;</a></h1>
+<h1 id="python">Python 接口树<a class="headerlink" href="#python" title="Permanent link">&para;</a></h1>
+<p>通用任务入口：<code>chattask.agent_tasks.AgentTaskService</code>（create/get/list/wait/cancel）、<code>run_task</code>；执行器：<code>chattask.codex_tasks.CodexTaskExecutor</code>，配置：<code>CodexRuntime</code>。任务只提供说明、镜像配置和可选的前次结果 ID，不提供宿主密钥或路径。</p>
 <p>CLI 和 Web 复用可导入的业务层；导入 <code>chattask</code> 本身不连接 Docker、读取令牌、建目录或启动服务。</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>chattask
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── TaskSettings / settings.load_settings(profile=..., home=...)
@@ -509,7 +551,7 @@
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>├── executor.SandboxExecutor       # OpenSandbox 真执行与独立清理核验
 <a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>├── tool_client.ChatPyPITools      # PyPI 命名 profile / ChatAuth TokenStore / REST
 <a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>├── release.ChatGHReleaseAdapter   # 已合并 PR、检查、标签写入/核对
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>├── create_app(settings, service=..., workflow=...)
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>├── create_app(settings, service=..., workflow=..., agent_tasks=...)
 <a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>└── state_paths(home=...)
 </code></pre></div>
 <p><code>WorkflowService.create_run</code> 接受 <code>request_id</code>、<code>repository_id</code>、<code>template_id</code>、<code>version</code>，以及可选 <code>install_extras</code>（最多四个简单名称）和 <code>pull_request</code>。认证所有者由 Web 服务端传入；浏览器不能指定所有者或宿主路径。内置模板 ID 是 <code>python-release</code>。自定义模板允许的步骤为 <code>probe</code>、<code>test</code>（<code>pytest</code> / <code>unittest</code> / <code>compileall</code>）、<code>build</code>、<code>check</code>；<code>check</code> 必须在 <code>build</code> 后。修订后已创建运行仍绑定旧步骤快照。</p>

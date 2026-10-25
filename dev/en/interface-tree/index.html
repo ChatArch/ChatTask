@@ -229,6 +229,25 @@
   
   
   
+  
+    <li class="md-tabs__item">
+      <a href="../tasks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Generic Tasks and Images
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
     
   
   
@@ -318,6 +337,28 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Generic Tasks and Images
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -339,10 +380,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -355,8 +396,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_2">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             Commands and APIs
           </label>
@@ -491,6 +532,7 @@
 
 
 <h1 id="python-api">Python API<a class="headerlink" href="#python-api" title="Permanent link">&para;</a></h1>
+<p>Generic tasks use <code>chattask.agent_tasks.AgentTaskService</code> (create/get/list/wait/cancel) and <code>run_task</code>. <code>chattask.codex_tasks.CodexTaskExecutor</code> consumes <code>CodexRuntime</code>; tasks supply instructions, a registered image profile and optional prior result ID, never host secrets or paths.</p>
 <p>CLI and Web share importable business APIs. <code>import chattask</code> itself does not connect Docker, read tokens, create state or start services.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>chattask
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── TaskSettings / settings.load_settings(profile=..., home=...)
@@ -509,7 +551,7 @@
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>├── executor.SandboxExecutor       # Real OpenSandbox execution and independent cleanup check
 <a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>├── tool_client.ChatPyPITools      # PyPI named profile / ChatAuth TokenStore / REST
 <a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>├── release.ChatGHReleaseAdapter   # Merged PR, checks, tag write/reconciliation
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>├── create_app(settings, service=..., workflow=...)
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>├── create_app(settings, service=..., workflow=..., agent_tasks=...)
 <a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>└── state_paths(home=...)
 </code></pre></div>
 <p><code>WorkflowService.create_run</code> accepts <code>request_id</code>, <code>repository_id</code>, <code>template_id</code>, <code>version</code> and optional <code>install_extras</code> (up to four simple names) and <code>pull_request</code>. Web derives the authenticated owner on the server; the browser cannot supply owner or host path. The built-in template ID is <code>python-release</code>. Custom steps are limited to <code>probe</code>, <code>test</code> (<code>pytest</code> / <code>unittest</code> / <code>compileall</code>), <code>build</code> and <code>check</code>; <code>check</code> must follow <code>build</code>. Existing runs keep their bound step snapshot after a new template revision.</p>

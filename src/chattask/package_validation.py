@@ -116,7 +116,7 @@ for branch,entry in plan['sources'].items():
    raise SystemExit('distribution metadata mismatch')
  receipts[branch]={'tests_sha256':test_hash,'build_sha256':build_hash,'wheel_sdist':sorted(x.name for x in dist)}
  if branch=='main':plan['placeholder_artifacts']=rebuilt_registration_artifacts(dest/'dist')
-validation=plan.get('validation',{})
+validation={}  # Only controller-executed facts are authoritative; discard model annotations.
 validation['tools']={'status':'passed','evidence':'Read-only scoped tool catalog and probe completed in Sandbox'}
 validation['target']={'status':'passed','evidence':target_evidence}
 validation['tests']={'status':'passed','evidence':'Executed tests in Sandbox: '+json.dumps(receipts,sort_keys=True)}

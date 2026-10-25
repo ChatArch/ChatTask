@@ -187,6 +187,16 @@ def _workflow_contract(files):
                 candidates.append((name,label))
     if len(candidates)!=1:raise ValueError('exactly one standard PyPI publish action required')
 
+def trusted_checks(value):
+    required=('tools','tests','build','metadata','target')
+    if not isinstance(value,dict) or not set(required)<=set(value):
+        raise ValueError('validation receipts incomplete')
+    result={key:value[key] for key in required}
+    for item in result.values():
+        if not isinstance(item,dict) or set(item)!={'status','evidence'} or item['status']!='passed' or not isinstance(item['evidence'],str) or not 8<=len(item['evidence'])<=2000:
+            raise ValueError('validation check not passed')
+    return result
+
 def _verify_plan(archive_bytes,spec):
     if not isinstance(archive_bytes,bytes) or len(archive_bytes)>20*1024*1024:
         raise ValueError('preparation archive too large')
@@ -259,12 +269,7 @@ def _verify_plan(archive_bytes,spec):
         data=_bytes(item,5*1024*1024)
         _distribution(filename,data,spec,source_bytes['main'])
         artifact_digests[filename]=item['sha256']
-    checks=plan['validation']
-    if not isinstance(checks,dict) or set(checks)!=set(('tools','tests','build','metadata','target')):
-        raise ValueError('validation receipts incomplete')
-    for item in checks.values():
-        if not isinstance(item,dict) or set(item)!={'status','evidence'} or item['status']!='passed' or not isinstance(item['evidence'],str) or not 8<=len(item['evidence'])<=2000:
-            raise ValueError('validation check not passed')
+    checks=trusted_checks(plan['validation'])
     result={'plan_sha256':hashlib.sha256(raw).hexdigest(),'archive_sha256':hashlib.sha256(archive_bytes).hexdigest(),
             'source_manifests':digests,'artifact_digests':artifact_digests,'validation':checks,
             'policy':policy(spec,sources=digests,artifact_digests=artifact_digests)}

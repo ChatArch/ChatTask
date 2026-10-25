@@ -22,6 +22,14 @@ class ReviewRegressionTests(unittest.TestCase):
      raw=base64.b64decode(item['content_base64']).replace(b'on:\n  push:\n    tags: ["v*"]',b'on:\n  workflow_dispatch:')
      item.update(content_base64=base64.b64encode(raw).decode(),sha256=hashlib.sha256(raw).hexdigest())
    with self.subTest(change=change),self.assertRaises(ValueError):verify_plan(self.archive(plan),spec)
+ def test_ci_must_allow_both_main_push_and_pull_request_without_skip_filters(self):
+  variants=[{'push':{'tags':['v*']},'pull_request':None},{'push':{'branches':['dev']},'pull_request':None},{'push':{'branches':['main']},'pull_request':{'branches':['dev']}},{'push':{'branches':['main'],'paths':['unrelated/**']},'pull_request':None}]
+  import yaml
+  for events in variants:
+   spec,plan=self.plan()
+   for source in plan['sources'].values():
+    item=next(x for x in source['files'] if x['path']=='.github/workflows/ci.yml');document=yaml.safe_load(base64.b64decode(item['content_base64']));document.pop(True,None);document['on']=events;raw=yaml.safe_dump(document).encode();item.update(content_base64=base64.b64encode(raw).decode(),sha256=hashlib.sha256(raw).hexdigest())
+   with self.subTest(events=events),self.assertRaises(ValueError):verify_plan(self.archive(plan),spec)
  def test_unreviewed_wheel_executables_and_duplicate_members_rejected(self):
   for path in ['demo_package/rogue.so','demo_package-0.0.1.data/scripts/rogue','demo_package/__init__.py']:
    spec,plan=self.plan();item=next(x for x in plan['placeholder_artifacts'] if x['filename'].endswith('.whl'));stream=io.BytesIO(base64.b64decode(item['content_base64']))

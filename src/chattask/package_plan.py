@@ -157,6 +157,12 @@ def _workflow_contract(files):
     job=(ci.get('jobs') or {}).get('test')
     if not {'push','pull_request'}<=event_names or not isinstance(job,dict) or job.get('name','test')!='test' or 'matrix' in (job.get('strategy') or {}) and 'name' not in job:
         raise ValueError('exact project test check and PR/main CI triggers required')
+    if isinstance(events,dict):
+        for event in ['push','pull_request']:
+            filters=events[event]
+            if filters is None or filters=={}:continue
+            if not isinstance(filters,dict) or set(filters)!={'branches'} or not isinstance(filters['branches'],list) or 'main' not in filters['branches'] or any(not isinstance(branch,str) or branch.startswith('!') for branch in filters['branches']):
+                raise ValueError('CI must allow main push and main PR without tag/path/type skip filters')
     text=files['.github/workflows/publish.yml'].decode('utf-8')
     # Match the deployed tag gate before any irreversible name registration.
     if not all(value in text for value in ['id-token: write','pypa/gh-action-pypi-publish','on:\n  push:\n    tags:','v*']):

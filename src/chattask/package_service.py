@@ -1,5 +1,7 @@
 """Owner-bound durable package drafts over the generic task engine."""
 from __future__ import annotations
+import asyncio
+from functools import partial
 import hashlib
 import json
 import re
@@ -18,7 +20,7 @@ def _task_request(prefix,owner,draft,revision,request_id):
     return prefix+'-'+_digest([owner,draft,revision,request_id])[:56]
 
 class PackageService:
-    def __init__(self,store,tasks,*,broker_required=False):
+    def __init__(self,store,tasks,*,broker_required=False,public_dependencies: bytes | None=None):
         self.store=store
         self.tasks=tasks
         self.broker_required=broker_required
@@ -26,7 +28,8 @@ class PackageService:
         if executor is not None and hasattr(executor,'register_postprocessor'):
             from .package_publication import prepare_postprocess,publish_postprocess
             executor.register_postprocessor('prepare',prepare_postprocess,600)
-            executor.register_postprocessor('publish',publish_postprocess,480)
+            executor.register_postprocessor('publish',partial(publish_postprocess,public_dependencies=public_dependencies),500)
+            executor.register_postprocessor('verify',partial(publish_postprocess,public_dependencies=public_dependencies),500)
 
     def _owned(self,owner,ident):
         if not isinstance(ident,str) or not DRAFT_ID.fullmatch(ident):
@@ -99,6 +102,23 @@ class PackageService:
             task=self.tasks.get(owner,draft['publish_task_id'])
             verified=task['status']=='completed' and any(item.get('name')=='trusted-publication.json' for item in task.get('artifacts',[]))
             draft={**draft,'publish_status':task['status'],'publish_result':task.get('result'),'publish_error':task.get('error'),'publish_verified':verified}
+        if draft.get('verification_task_id'):
+            task=self.tasks.get(owner,draft['verification_task_id'])
+            rechecked=False
+            if task['status']=='completed' and draft.get('preview'):
+                entry=next((item for item in task.get('artifacts',[]) if item.get('name')=='trusted-publication.json'),None)
+                if entry and entry.get('size',0)<=50000:
+                    try:
+                        raw=self.store.artifact(task['id'],'trusted-publication.json')
+                        receipt=json.loads(raw)
+                        rechecked=(len(raw)==entry['size'] and hashlib.sha256(raw).hexdigest()==entry['sha256'] and
+                            receipt.get('plan_sha256')==draft['preview']['plan_sha256'] and
+                            receipt.get('repository')==draft['preview']['policy']['repository'] and
+                            receipt.get('version')==draft['preview']['policy']['version'])
+                    except (ValueError,KeyError,OSError,TypeError):
+                        pass
+            draft={**draft,'verification_status':task['status'],'verification_error':task.get('error'),
+                'publish_verified':draft.get('publish_verified',False) or rechecked}
         return self._public(draft)
 
     async def create(self,owner,body):
@@ -235,5 +255,89 @@ class PackageService:
             fresh=self._owned(owner,ident)
             if fresh.get('confirm_request_id')==body['request_id']:
                 fresh['publish_task_id']=task['id'];fresh['updated_at']=now()
+                self.store.put('package_drafts',ident,fresh)
+        return self.get(owner,ident)
+
+    async def recheck(self,owner,ident,body):
+        """Create an explicit read-only task against an immutable approved publication."""
+        if self.broker_required and not getattr(getattr(self.tasks,'executor',None),'gateway',None):
+            raise ValueError('package verification requires configured task gateway')
+        _request(body,('request_id','revision'))
+        draft=self._owned(owner,ident)
+        if body['revision']!=draft['revision']:
+            raise ValueError('stale draft revision')
+        if not draft.get('preview') and draft.get('prepare_task_id'):
+            self.get(owner,ident)
+            draft=self._owned(owner,ident)
+        preview=draft.get('preview');approval=draft.get('approval')
+        if not draft.get('confirm_request_id') or not draft.get('publish_task_id') or not preview or not approval:
+            raise ValueError('submitted, approved preflight and publish task required')
+        if (preview.get('revision')!=draft['revision'] or preview.get('spec_fingerprint')!=draft['fingerprint'] or
+            preview.get('task_id')!=draft.get('prepare_task_id') or approval.get('owner')!=owner or
+            approval.get('revision')!=draft['revision'] or approval.get('preview_sha256')!=preview.get('preview_sha256') or
+            approval.get('confirmation')!=preview.get('confirmation')):
+            raise ValueError('approved preview changed')
+        publish=self.tasks.get(owner,draft['publish_task_id'])
+        if publish['status'] not in ('completed','blocked','interrupted','cancelled'):
+            raise ValueError('original publish task is not terminal')
+        prep=self.tasks.get(owner,draft['prepare_task_id'])
+        artifact=next((a for a in prep.get('artifacts',[]) if a.get('name')=='result.tar.gz'),None)
+        att=next((a for a in prep.get('artifacts',[]) if a.get('name')=='trusted-validation.json'),None)
+        if prep['status']!='completed' or not artifact or not att or att.get('size',0)>50000:
+            raise ValueError('completed verified preparation required')
+        data=self.store.artifact(prep['id'],'result.tar.gz')
+        if len(data)!=artifact['size'] or hashlib.sha256(data).hexdigest()!=artifact['sha256']:
+            raise ValueError('preparation archive changed')
+        checked=verify_plan(data,draft['spec'])
+        if (checked['archive_sha256']!=preview['archive_sha256'] or checked['plan_sha256']!=preview['plan_sha256'] or
+            checked['policy']!=preview['policy'] or checked['source_manifests']!=preview['source_manifests']):
+            raise ValueError('approved plan changed')
+        att_bytes=self.store.artifact(prep['id'],'trusted-validation.json')
+        if len(att_bytes)!=att['size'] or hashlib.sha256(att_bytes).hexdigest()!=att['sha256']:
+            raise ValueError('preparation validation changed')
+        evidence=json.loads(att_bytes)
+        if (evidence.get('plan_sha256')!=checked['plan_sha256'] or
+            trusted_checks(evidence.get('checks'))!=checked['validation'] or
+            set(evidence.get('branches',{}))!=set(checked['source_manifests'])):
+            raise ValueError('preparation validation does not bind approved plan')
+        images=self.tasks.images() if callable(self.tasks.images) else self.tasks.images
+        names=[x['id'] for x in images] if isinstance(images,list) else list(images)
+        if prep.get('image_profile') not in names:
+            raise ValueError('original image profile is unavailable')
+        digest=_digest(body)
+        with self.store.locked():
+            fresh=self._owned(owner,ident)
+            self._check_other_request(owner,body['request_id'],ident)
+            old=fresh['operations'].get(body['request_id'])
+            if old and (old['kind']!='recheck' or old['fingerprint']!=digest):
+                raise ValueError('request_id input conflict')
+            if fresh.get('confirm_request_id')==body['request_id']:
+                raise ValueError('request_id already used for confirmation')
+            if fresh['revision']!=draft['revision'] or fresh.get('preview')!=preview or fresh.get('approval')!=approval:
+                raise ValueError('approved preview changed')
+            previous=fresh.get('verification_task_id')
+            if fresh.get('verification_request_id') and fresh['verification_request_id']!=body['request_id']:
+                if not previous or self.tasks.get(owner,previous)['status'] not in ('completed','blocked','interrupted','cancelled'):
+                    raise ValueError('verification already running')
+            fresh['verification_request_id']=body['request_id']
+            fresh['verification_task_id']=previous if old else None
+            fresh['operations'][body['request_id']]={'kind':'recheck','fingerprint':digest}
+            fresh['updated_at']=now()
+            self.store.put('package_drafts',ident,fresh)
+        gateway=getattr(getattr(self.tasks,'executor',None),'gateway',None)
+        if not gateway or not callable(getattr(gateway,'close',None)):
+            raise ValueError('trusted gateway lease closure is required')
+        closed=await asyncio.to_thread(gateway.close,draft['publish_task_id'])
+        if closed!={'closed':True}:
+            raise ValueError('original publish lease closure unconfirmed')
+        task=await self.tasks.create_internal(owner,{'request_id':_task_request('pkgverify',owner,ident,draft['revision'],body['request_id']),
+            'instructions':'Read-only trusted publication verification of the approved preparation archive.',
+            'image_profile':prep['image_profile'],'input_task_id':prep['id']},
+            {'mode':'verify','plan':preview['policy'],'spec':draft['spec'],'plan_sha256':preview['plan_sha256'],
+             'source_task_id':draft['publish_task_id']})
+        with self.store.locked():
+            fresh=self._owned(owner,ident)
+            if fresh.get('verification_request_id')==body['request_id'] and fresh['revision']==draft['revision']:
+                fresh['verification_task_id']=task['id'];fresh['updated_at']=now()
                 self.store.put('package_drafts',ident,fresh)
         return self.get(owner,ident)

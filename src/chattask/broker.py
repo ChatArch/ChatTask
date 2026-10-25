@@ -67,7 +67,7 @@ class GatewayClient:
     def create(self,request_id,mode,plan):
         if not isinstance(request_id,str) or not re.fullmatch(r'[a-f0-9]{32}',request_id):
             raise ValueError('task ID required')
-        if mode not in ('generic','prepare','publish') or (mode=='generic') != (plan is None):
+        if mode not in ('generic','prepare','publish','verify') or (mode=='generic') != (plan is None):
             raise ValueError('invalid gateway session mode/policy')
         payload=json.dumps({'request_id':request_id,'mode':mode,'plan':plan},sort_keys=True,separators=(',',':')).encode()
         request=urllib.request.Request(self.origin+'/control/sessions',data=payload,method='POST',
@@ -100,18 +100,23 @@ class GatewayClient:
             ident=value['id']
             if ident!=request_id:
                 raise ValueError()
-            model=_https(value['model_base_url'])
             expected=self.origin+'/sessions/'+ident
-            if value['model_base_url']!=expected+'/v1' or model!=expected+'/v1':
-                raise ValueError()
             tool=value['tool_base_url']
-            if mode=='generic':
-                if tool or value['tool_access_token']:
+            if mode=='verify':
+                if value['model_base_url'] or value['model_access_token'] or tool!=expected or not isinstance(value['tool_access_token'],str) or not value['tool_access_token']:
                     raise ValueError()
-            elif tool!=expected or not value['tool_access_token']:
-                raise ValueError()
-            if not value['model_access_token'] or not isinstance(value['model_access_token'],str):
-                raise ValueError()
+                model=''
+            else:
+                model=_https(value['model_base_url'])
+                if value['model_base_url']!=expected+'/v1' or model!=expected+'/v1':
+                    raise ValueError()
+                if mode=='generic':
+                    if tool or value['tool_access_token']:
+                        raise ValueError()
+                elif tool!=expected or not value['tool_access_token']:
+                    raise ValueError()
+                if not value['model_access_token'] or not isinstance(value['model_access_token'],str):
+                    raise ValueError()
             raw_expiry=value['expires_at']
             expires=(datetime.fromtimestamp(raw_expiry,timezone.utc) if isinstance(raw_expiry,(int,float)) and not isinstance(raw_expiry,bool)
                      else datetime.fromisoformat(raw_expiry.replace('Z','+00:00')))
@@ -120,3 +125,24 @@ class GatewayClient:
             return GatewaySession(ident,model,value['model_access_token'],tool,value['tool_access_token'],value['expires_at'])
         except (KeyError,TypeError,ValueError,OverflowError,AttributeError):
             raise GatewayUnknown('invalid gateway session response; retry same task ID') from None
+
+    def close(self,request_id):
+        if not isinstance(request_id,str) or not re.fullmatch(r'[a-f0-9]{32}',request_id):
+            raise ValueError('task ID required')
+        request=urllib.request.Request(self.origin+'/control/sessions/'+request_id+'/close',
+            data=b'',method='POST',headers={'Authorization':'Bearer '+self._token,
+            'Content-Type':'application/json','Accept':'application/json'})
+        try:
+            with self._open(request,timeout=8) as response:
+                if response.status!=200 or int(response.headers.get('content-length','0'))>4096:
+                    raise GatewayUnknown('gateway lease closure outcome unknown')
+                raw=response.read(4097)
+            if len(raw)>4096 or json.loads(raw)!={'closed':True}:
+                raise GatewayUnknown('gateway lease closure outcome unknown')
+            return {'closed':True}
+        except urllib.error.HTTPError as exc:
+            if 400<=exc.code<500:
+                raise RuntimeError('gateway lease closure denied') from None
+            raise GatewayUnknown('gateway lease closure outcome unknown') from None
+        except (urllib.error.URLError,TimeoutError,OSError,ValueError,TypeError):
+            raise GatewayUnknown('gateway lease closure outcome unknown') from None

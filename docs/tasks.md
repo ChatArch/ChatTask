@@ -71,4 +71,10 @@ Python 发包是同一任务入口中的版本化模板；网页表单与 GET /a
 
 发包预检每分支最多 100 个文件、单文件 200000 字节、合计 2000000 字节。确认后，原生 Codex 完成仅代表候选执行完成；受信后处理还要重新校验批准的计划哈希，从受限 /github/api/status 回读精确 release 源码清单、PR/合并 SHA、两次精确 HEAD CI、合并树 tag 和实际 publish.yml 的 Publish-to-PyPI job/step。然后核验目标版本 PyPI JSON 与 wheel/sdist 文件 SHA256，并在全新 Sandbox venv 安装，运行声明的 CLI --version 和 --tree。任何缺失或失败都将任务标为 blocked，成功证据保存在 trusted-publication.json 和安装日志。受限 status 接口需返回 repository、branches（release SHA、manifest_digest 与 base_sha、main SHA 和 manifest_digest）、pull_request、ci.release / ci.main、tag、publish（workflow/head SHA、job/step 名称、结论和实际 publish action）字段；字段必须来自提供方回执。
 
+发布核验经同一受限工具会话 GET /pypi/api/release 读取精确版本 JSON；新项目另经 GET /pypi/api/placeholder 核验 0.0.1。仅按官方文件摘要请求 GET /pypi/api/artifacts/{sha256}（单文件最多 10 MiB），再次计算字节摘要并安装已核验的目标 wheel。网关须将这些固定只读路由限制到已批准项目、版本与官方文件摘要。配置现有 CHATTASK_PUBLIC_DEPS_PATH 和 CHATTASK_PUBLIC_DEPS_SHA256 时，受信后处理只从已校验归档的 deps/wheelhouse/*.whl 提取依赖到全新目录，使用 --no-index --find-links 安装目标 wheel；归档内已安装的 .py/.so 文件不当作 wheel。归档缺少 wheel、摘要或路径不合格会阻断核验。未配置归档时保留显式公共索引依赖解析。回执记录依赖来源和归档 SHA256；运维需提供包含原基础文件与 wheelhouse 的新固定归档。
+
 网关服务、目标工具策略、镜像中的 build/test 依赖、真实发布回读与部署由受信控制面负责；这些源码接口本身不表示服务已经上线。CLI 可用 chattask package schema|plan|draft-create|draft-show|prepare|confirm。CLI 草稿使用独立的受信 operator 身份，与网页草稿隔离。
+
+### 已提交发包的只读重新核验
+
+若原发布任务已经结束但最终只读回读因网络等原因受阻，草稿页显示“只读重新核验”。此按钮使用同一已批准预检归档、源码清单、目标和版本，创建新的受信 Sandbox 核验任务；不会运行 Codex、重新上传、创建 PR 或标签。原发布任务状态与错误保持原样。核验成功后页面分别显示新任务通过和原任务记录；失败时可用新请求 ID 显式再核验。网络结果不确定时，浏览器保留原请求 ID 并用同一键核对。网关 verify 会话只提供受限只读工具，不提供模型访问；控制端发送原策略加 verification_of 原发布任务 ID。公共注册表和受限状态查询只对超时/连接失败作最多两次有界尝试，证书、权限、目标和摘要失败直接阻断。

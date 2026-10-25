@@ -522,7 +522,7 @@ function clearPackageState() {
   for (const id of ['package-link','package-progress','package-preview','package-state']) $(id).textContent = '';
   $('package-intent').value = ''; $('package-confirm-text').checked = false;
   $('package-confirm-box').hidden = true;
-  for (const id of ['package-save','package-prepare','package-confirm','package-prefill','package-retry-confirm']) $(id).disabled = true;
+  for (const id of ['package-save','package-prepare','package-confirm','package-prefill','package-retry-confirm','package-recheck']) $(id).disabled = true;
 }
 function suggestPackageFields() {
   const value = $('pkg-package_name')?.value || '';
@@ -570,6 +570,10 @@ function packageControls() {
     !packageDraft.preview || submitted || !$('package-confirm-text').checked;
   $('package-retry-confirm').disabled = !authenticated || packageBusy || !hasDraft ||
     packageDraft.publish_error !== 'GatewayUnknown';
+  $('package-recheck').disabled = !authenticated || packageBusy || !hasDraft || dirty || !packageSchema?.available ||
+    !submitted || !['completed','blocked','interrupted','cancelled'].includes(packageDraft.publish_status) ||
+    ['queued','running','cancel_requested'].includes(packageDraft.verification_status) ||
+    !!packageDraft.publish_verified || !!(packagePending && packagePending.kind !== 'recheck');
 }
 function packagePendingSet(value) {
   packagePending = value;
@@ -608,10 +612,13 @@ function renderPackage(draft) {
   const dirty = packageDirty();
   const prep = draft.prepare_task_id ? '预检任务 ' + draft.prepare_task_id + ' · ' + (draft.prepare_status || '可刷新') : '尚未预检';
   const pub = draft.publish_task_id ? '；发布任务 ' + draft.publish_task_id + ' · ' + (draft.publish_status || '可刷新') : '';
-  show('package-progress', prep + pub + (dirty ? '；参数有未保存修改' : ''));
+  const verification = draft.verification_task_id ? '；只读核验任务 ' + draft.verification_task_id + ' · ' + (draft.verification_status || '可刷新') : '';
+  show('package-progress', prep + pub + verification + (dirty ? '；参数有未保存修改' : ''));
   const preview = draft.preview;
   $('package-confirm-box').hidden = !preview || !!draft.publish_task_id || dirty;
   $('package-retry-confirm').hidden = draft.publish_error !== 'GatewayUnknown';
+  $('package-recheck').hidden = !draft.publish_task_id || !['completed','blocked','interrupted','cancelled'].includes(draft.publish_status);
+  $('package-recheck-note').hidden = $('package-recheck').hidden;
   $('package-confirm-target').textContent = preview ? preview.policy.repository + ' · ' + preview.policy.tag : '';
   if (preview) {
     $('package-preview').textContent = JSON.stringify({
@@ -624,11 +631,11 @@ function renderPackage(draft) {
   } else $('package-preview').textContent = draft.prepare_task_id ?
     '预检任务正在执行或结果尚未验证。刷新后查看精确目标与产物摘要。' : '请先保存草稿并运行预检。';
   $('package-artifacts').replaceChildren();
-  for (const id of [draft.prepare_task_id, draft.publish_task_id]) {
+  for (const id of [draft.prepare_task_id, draft.publish_task_id, draft.verification_task_id]) {
     if (!id) continue;
     const a = document.createElement('a');
     a.href = '/api/agent/tasks/' + id;
-    a.textContent = (id === draft.prepare_task_id ? '预检' : '发布') + '任务状态 · ' + id;
+    a.textContent = (id === draft.prepare_task_id ? '预检' : id === draft.publish_task_id ? '发布' : '只读核验') + '任务状态 · ' + id;
     a.target = '_blank'; a.rel = 'noopener';
     $('package-artifacts').append(a);
     const download = document.createElement('a');
@@ -638,7 +645,11 @@ function renderPackage(draft) {
   }
   if (draft.prepare_error) show('package-state', '预检验证受阻：' + draft.prepare_error, true);
   if (draft.publish_task_id) {
-    if (draft.publish_error || ['blocked','interrupted','cancelled'].includes(draft.publish_status)) {
+    if (draft.verification_status === 'completed' && draft.publish_verified)
+      show('package-state','重新核验通过；原执行记录保留。原发布任务：' + draft.publish_status + (draft.publish_error ? '（' + draft.publish_error + '）' : '') + '。');
+    else if (draft.verification_status && ['blocked','interrupted','cancelled'].includes(draft.verification_status))
+      show('package-state','只读重新核验受阻：' + (draft.verification_error || draft.verification_status) + '。原发布任务仍为 ' + draft.publish_status + '。',true);
+    else if (draft.publish_error || ['blocked','interrupted','cancelled'].includes(draft.publish_status)) {
       show('package-state','发布核验未完成：' + (draft.publish_error || draft.publish_status) + '。模型摘要不能作为发布成功的依据。',true);
     } else if (draft.publish_verified) show('package-state','发布完成，外部回执和干净安装核验已通过。');
     else show('package-state','发布状态：' + draft.publish_status + '；仍需完整外部核验。');
@@ -649,6 +660,8 @@ function renderPackage(draft) {
   if (draft.prepare_task_id && !preview && ['queued','running','cancel_requested'].includes(draft.prepare_status))
     packagePoll = setTimeout(() => loadPackage(draft.id), 2500);
   if (draft.publish_task_id && ['queued','running','cancel_requested'].includes(draft.publish_status))
+    packagePoll = setTimeout(() => loadPackage(draft.id), 2500);
+  if (draft.verification_task_id && ['queued','running','cancel_requested'].includes(draft.verification_status))
     packagePoll = setTimeout(() => loadPackage(draft.id), 2500);
 }
 async function loadPackage(id) {
@@ -777,4 +790,17 @@ $('package-retry-confirm').addEventListener('click', async () => {
     show('package-state', '已按同一任务 ID 重新核对网关会话。');
   } catch (error) { show('package-state', '同一任务重试未确认：' + error.message, true); }
   finally { packageBusy = false; packageControls(); }
+});
+
+$('package-recheck').addEventListener('click', async () => {
+  if (!packageDraft || packageBusy || packageDirty()) return;
+  packageBusy = true; packageControls();
+  try {
+    const body = {request_id:crypto.randomUUID(),revision:packageDraft.revision};
+    const draft = await packageMutation('recheck','/api/package/drafts/' + packageDraft.id + '/recheck','POST',body);
+    renderPackage(draft);
+    show('package-state','只读核验已提交；不会再次发布、创建 PR 或标签。原执行记录保留。');
+  } catch (error) {
+    show('package-state','只读核验结果未确认：' + error.message + '。重试此按钮会使用同一请求 ID。',true);
+  } finally { packageBusy = false; packageControls(); }
 });

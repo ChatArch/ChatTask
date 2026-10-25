@@ -79,6 +79,8 @@
             <label for="package-confirm-text"><input id="package-confirm-text" type="checkbox"> 我已核对目标和权限，授权按此快照发布</label>
             <button id="package-confirm" class="primary-action" type="button" disabled>确认并提交发布</button>
           </div>
+          <button id="package-recheck" class="secondary-action" type="button" hidden>只读重新核验</button>
+          <p id="package-recheck-note" class="meta-note" hidden>只读取已发布结果；不会再次发布、创建 PR 或标签。原执行记录和错误保留。</p>
           <button id="package-retry-confirm" class="secondary-action" type="button" hidden>重试同一网关会话</button>
           <button id="package-refresh" class="secondary-action" type="button">刷新状态</button>
         </section>

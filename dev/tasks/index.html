@@ -446,6 +446,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      已提交发包的只读重新核验
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -661,6 +670,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      已提交发包的只读重新核验
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -790,7 +808,10 @@
 <p>可选的 CHATTASK_GATEWAY_URL 必须是 HTTPS origin，并与敏感 CHATTASK_GATEWAY_CLIENT_TOKEN 成对配置。发包预检与提交要求此网关；通用任务仍可沿用既有配置。每次真实任务执行开始时，控制端用任务 ID 向 POST /control/sessions 请求会话：generic 的 plan 为 null 且只有模型访问；prepare 的策略为 project,repository,version,description,mode,release_branch,tag；publish 再增加精确 sources 清单摘要与 base_sha、artifact_digests 和 actions。未知创建结果只按相同任务 ID 核对，不换新键。网关返回的模型和工具 token 分开注入 guest；原始上游密钥不进入 ChatTask 配置或 Sandbox。CHATTASK_CODEX_HOSTS 仅接受运维提供的 hostname→IP JSON，映射只追加到 guest 的 /etc/hosts。</p>
 <p>网关会话响应必须将 id 精确绑定任务 ID，model_base_url 必须为 <gateway-origin>/sessions/<id>/v1；发包任务的 tool_base_url 必须为同一会话根路径，通用任务不接收工具 URL。可选 CHATTASK_GATEWAY_CA_FILE 指向运维提供的绝对路径、公有 PEM CA（最多 64 KiB）；控制端以默认系统信任为基础加载它，Sandbox 在系统 CA 包后追加这份证书，并将合并包提供给 Codex、Python 和 Requests。控制 token 与 CA 私钥不进入 Sandbox。</p>
 <p>发包预检每分支最多 100 个文件、单文件 200000 字节、合计 2000000 字节。确认后，原生 Codex 完成仅代表候选执行完成；受信后处理还要重新校验批准的计划哈希，从受限 /github/api/status 回读精确 release 源码清单、PR/合并 SHA、两次精确 HEAD CI、合并树 tag 和实际 publish.yml 的 Publish-to-PyPI job/step。然后核验目标版本 PyPI JSON 与 wheel/sdist 文件 SHA256，并在全新 Sandbox venv 安装，运行声明的 CLI --version 和 --tree。任何缺失或失败都将任务标为 blocked，成功证据保存在 trusted-publication.json 和安装日志。受限 status 接口需返回 repository、branches（release SHA、manifest_digest 与 base_sha、main SHA 和 manifest_digest）、pull_request、ci.release / ci.main、tag、publish（workflow/head SHA、job/step 名称、结论和实际 publish action）字段；字段必须来自提供方回执。</p>
+<p>发布核验经同一受限工具会话 GET /pypi/api/release 读取精确版本 JSON；新项目另经 GET /pypi/api/placeholder 核验 0.0.1。仅按官方文件摘要请求 GET /pypi/api/artifacts/{sha256}（单文件最多 10 MiB），再次计算字节摘要并安装已核验的目标 wheel。网关须将这些固定只读路由限制到已批准项目、版本与官方文件摘要。配置现有 CHATTASK_PUBLIC_DEPS_PATH 和 CHATTASK_PUBLIC_DEPS_SHA256 时，受信后处理只从已校验归档的 deps/wheelhouse/*.whl 提取依赖到全新目录，使用 --no-index --find-links 安装目标 wheel；归档内已安装的 .py/.so 文件不当作 wheel。归档缺少 wheel、摘要或路径不合格会阻断核验。未配置归档时保留显式公共索引依赖解析。回执记录依赖来源和归档 SHA256；运维需提供包含原基础文件与 wheelhouse 的新固定归档。</p>
 <p>网关服务、目标工具策略、镜像中的 build/test 依赖、真实发布回读与部署由受信控制面负责；这些源码接口本身不表示服务已经上线。CLI 可用 chattask package schema|plan|draft-create|draft-show|prepare|confirm。CLI 草稿使用独立的受信 operator 身份，与网页草稿隔离。</p>
+<h3 id="_7">已提交发包的只读重新核验<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<p>若原发布任务已经结束但最终只读回读因网络等原因受阻，草稿页显示“只读重新核验”。此按钮使用同一已批准预检归档、源码清单、目标和版本，创建新的受信 Sandbox 核验任务；不会运行 Codex、重新上传、创建 PR 或标签。原发布任务状态与错误保持原样。核验成功后页面分别显示新任务通过和原任务记录；失败时可用新请求 ID 显式再核验。网络结果不确定时，浏览器保留原请求 ID 并用同一键核对。网关 verify 会话只提供受限只读工具，不提供模型访问；控制端发送原策略加 verification_of 原发布任务 ID。公共注册表和受限状态查询只对超时/连接失败作最多两次有界尝试，证书、权限、目标和摘要失败直接阻断。</p>
 
 
 

@@ -60,13 +60,15 @@ class TaskService:
                 'pids_limit': h['PidsLimit'], 'privileged': h['Privileged'],
                 'mount_count': len(attrs['Mounts'])}
 
-    async def create(self) -> tuple[Sandbox, ConnectionConfig, dict]:
+    async def create(self, *, ttl_seconds: int = 600) -> tuple[Sandbox, ConnectionConfig, dict]:
+        if type(ttl_seconds) is not int or not 60 <= ttl_seconds <= 7200:
+            raise ValueError('sandbox lifetime must be 60–7200 seconds')
         cfg = self.connection()
         sandbox = None
         try:
             sandbox = await Sandbox.create(
-                self.settings.image, entrypoint=['/bin/sh', '-c', 'sleep 600'],
-                timeout=timedelta(minutes=10), ready_timeout=timedelta(seconds=35),
+                self.settings.image, entrypoint=['/bin/sh', '-c', 'sleep '+str(ttl_seconds)],
+                timeout=timedelta(seconds=ttl_seconds), ready_timeout=timedelta(seconds=35),
                 resource={'cpu': '1', 'memory': '512Mi'},
                 metadata={'purpose': 'chattask'},
                 connection_config=cfg,

@@ -9,6 +9,10 @@ Starting with 0.1.0, ChatTask adds reusable task templates, trusted Git snapshot
 - **Release gate**: preflight is the default. A GitHub tag needs separate confirmation bound to repository, version, source commit, source tree and text; it also requires a merged PR, exact `test` CI/workflow and equality of merged/preflight trees. A verified tag still awaits independent OIDC workflow and PyPI artifact verification.
 - **Persistent UI**: reconnect from history, cooperative cancellation, digest-checked downloads, protected tool status and auth-loss cleanup. The older Sandbox experiments remain under a primary tab.
 
+## Generic task entry
+
+The product model is **task → Codex + Sandbox → result**. Instructions and a selected image determine the work; publishing is an example, not the engine's fixed workflow. Current source exposes `chattask run` and authenticated `/api/agent/tasks`, with native events, output digests and Sandbox cleanup evidence. Images supply infrastructure; runtime env injects server-selected model/tool access. Prefer constrained short-lived gateways and keep original GitHub/PyPI credentials outside the guest. See [generic tasks and images](docs/tasks.en.md). Source capabilities do not imply a public release or live deployment.
+
 ## Run from source
 
 ```bash

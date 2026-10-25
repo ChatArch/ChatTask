@@ -1,5 +1,8 @@
 # Python API
 
+Generic tasks use `chattask.agent_tasks.AgentTaskService` (create/get/list/wait/cancel) and `run_task`. `chattask.codex_tasks.CodexTaskExecutor` consumes `CodexRuntime`; tasks supply instructions, a registered image profile and optional prior result ID, never host secrets or paths.
+
+
 CLI and Web share importable business APIs. `import chattask` itself does not connect Docker, read tokens, create state or start services.
 
 ```text
@@ -20,7 +23,7 @@ chattask
 ├── executor.SandboxExecutor       # Real OpenSandbox execution and independent cleanup check
 ├── tool_client.ChatPyPITools      # PyPI named profile / ChatAuth TokenStore / REST
 ├── release.ChatGHReleaseAdapter   # Merged PR, checks, tag write/reconciliation
-├── create_app(settings, service=..., workflow=...)
+├── create_app(settings, service=..., workflow=..., agent_tasks=...)
 └── state_paths(home=...)
 ```
 

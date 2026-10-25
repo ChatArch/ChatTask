@@ -12,16 +12,79 @@
   <main class="shell">
     <header class="masthead">
       <div class="eyebrow"><span class="signal"></span> TASK TEMPLATES / SANDBOX LAB <span class="slash">/</span> 01 <span class="account-controls"><span id="account-state">正在确认登录…</span> <button id="logout" type="button">退出登录</button></span></div>
-      <h1>从模板出发，<em>把结果交到手中。</em></h1>
-      <p class="intro">选择受信仓库和版本，先运行真实的检查与构建；每一步、每份产物和清理结果都可查看。旧有 Sandbox 实验仍可在下方切换。</p>
-      <div class="note"><strong>实验边界</strong><span>登录后可操作 · 仓库由管理员登记 · 默认只执行预检 · 发布标签必须再次明确批准</span></div>
+      <h1>交给任务，<em>把结果交到手中。</em></h1>
+      <p class="intro">描述任务，选择具备所需工具的镜像，让 Codex 在独立 Sandbox 中执行。结果、产物和回收记录统一留在 ChatTask；发包只是其中一种任务。</p>
+      <div class="note"><strong>实验边界</strong><span>登录后可操作 · 镜像提供 infra · 外部工具有受限权限 · 普通 runc 不等于敌对多租户强隔离</span></div>
     </header>
 
     <nav class="primary-nav" aria-label="主要功能">
-      <button id="templates-tab" type="button" aria-controls="template-view" aria-selected="true">任务模板 <span>Templates</span></button>
+      <button id="agent-tab" type="button" aria-controls="agent-view" aria-selected="true">任务 <span>Codex + Sandbox</span></button>
+      <button id="package-tab" type="button" aria-controls="package-view" aria-selected="false">Python 发包 <span>Package</span></button>
+      <button id="templates-tab" type="button" aria-controls="template-view" aria-selected="false">任务模板 <span>Templates</span></button>
       <button id="sandbox-tab" type="button" aria-controls="sandbox-view" aria-selected="false">Sandbox 实验 <span>Experiments</span></button>
     </nav>
-    <section id="template-view" aria-label="任务模板">
+    <section id="agent-view" aria-label="通用任务">
+      <div class="template-grid">
+        <section class="panel agent-input">
+          <div class="panel-no">01 <span>任务与运行环境</span></div>
+          <h2>说明目标，选择环境。</h2>
+          <p>镜像提供运行依赖；Codex 根据任务说明工作。外部工具权限由服务端限定，任务不能索取宿主密钥或挂载目录。</p>
+          <label for="agent-image">基础镜像配置</label><select id="agent-image"></select>
+          <label for="agent-instructions">任务说明与验收要求</label>
+          <textarea id="agent-instructions" rows="9" maxlength="16000" placeholder="例如：编写一个程序分析给定数据，实际运行测试，把报告和代码放到结果目录。"></textarea>
+          <p class="meta-note">工作目录 /workspace/work · 产物目录 /workspace/result · 模型与短期工具凭据仅在运行时注入，不进入镜像。</p>
+          <button id="agent-create" class="primary-action" type="button" disabled>创建任务并执行 ↗</button>
+          <div id="agent-create-state" class="status" role="status">正在读取可用镜像…</div>
+        </section>
+        <section class="panel dark">
+          <div class="panel-no">02 <span>Result</span></div><h2>结果与执行证据。</h2>
+          <label for="agent-history">任务历史</label><select id="agent-history"><option value="">选择任务</option></select>
+          <div id="agent-state" class="status" role="status">尚未选择任务。</div>
+          <pre id="agent-result" class="output"></pre>
+          <div id="agent-artifacts" class="artifact-list"></div>
+          <p class="meta-note">执行完成只表示 Codex 运行结束并回收环境。外部发布是否成功，仍以真实工具回执、注册表与安装验证为准。</p>
+          <button id="agent-refresh" class="secondary-action" type="button">刷新结果</button>
+        </section>
+      </div>
+    </section>
+    <section id="package-view" aria-label="Python 发包" hidden>
+      <div class="template-grid">
+        <section class="panel template-panel">
+          <div class="panel-no">01 <span>Python package</span></div>
+          <h2>一句话开始，参数自己确认。</h2>
+          <p>填入明确的功能要求；名字只用于定位项目，不会生成业务逻辑。预检在 Sandbox 中进行，发布前必须再次确认。</p>
+          <label for="package-intent">一句话需求（可选）</label>
+          <textarea id="package-intent" rows="2" maxlength="500" placeholder="例如：新建 demo-package Python 包"></textarea>
+          <button id="package-prefill" class="secondary-action" type="button">识别明显参数</button>
+          <div id="package-fields" class="package-fields"></div>
+          <label for="package-image">运行镜像</label><select id="package-image"></select>
+          <div class="package-actions">
+            <button id="package-save" class="primary-action" type="button">保存草稿</button>
+            <button id="package-prepare" class="secondary-action" type="button" disabled>运行发布前检查</button>
+          </div>
+          <div id="package-state" class="status" role="status" aria-live="polite">正在读取模板…</div>
+        </section>
+        <section class="panel dark run-panel">
+          <div class="panel-no">02 <span>Preflight → Confirm → Result</span></div>
+          <h2>核对目标与权限。</h2>
+          <label for="package-history">草稿历史</label><select id="package-history"><option value="">新草稿</option></select>
+          <div id="package-link" class="meta-note"></div>
+          <div id="package-progress" class="status" role="status"></div>
+          <pre id="package-preview" class="output">预检完成后显示真实产物摘要。</pre>
+          <div id="package-artifacts" class="artifact-list"></div>
+          <div id="package-confirm-box" class="approval-box" hidden>
+            <h3>确认精确发布目标</h3>
+            <p>核对目标、版本和预检结果。确认后将按这一份精确快照启动发布任务。</p>
+            <div id="package-confirm-target" class="approval-target"></div>
+            <label for="package-confirm-text"><input id="package-confirm-text" type="checkbox"> 我已核对目标和权限，授权按此快照发布</label>
+            <button id="package-confirm" class="primary-action" type="button" disabled>确认并提交发布</button>
+          </div>
+          <button id="package-retry-confirm" class="secondary-action" type="button" hidden>重试同一网关会话</button>
+          <button id="package-refresh" class="secondary-action" type="button">刷新状态</button>
+        </section>
+      </div>
+    </section>
+    <section id="template-view" aria-label="任务模板" hidden>
       <div class="template-grid">
         <section class="panel template-panel" aria-labelledby="template-title">
           <div class="panel-no">01 <span>配置预检</span></div>
@@ -95,7 +158,7 @@
       </section>
     </div>
     </section>
-    <footer><span>模板流程：snapshot → probe → test → build → check → approval</span><span>Sandbox 实验：create → exec → destroy</span></footer>
+    <footer><span>Task → Codex + Sandbox → Result</span><span>Sandbox 实验：create → exec → destroy</span></footer>
   </main>
 </body>
 </html>

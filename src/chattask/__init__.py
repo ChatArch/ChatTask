@@ -17,9 +17,9 @@ def __getattr__(name):
     raise AttributeError(name)
 
 
-def create_app(settings=None, *, service=None, workflow=None):
+def create_app(settings=None, *, service=None, workflow=None, agent_tasks=None):
     from .web import create_app as factory
-    return factory(settings, service=service, workflow=workflow)
+    return factory(settings, service=service, workflow=workflow, agent_tasks=agent_tasks)
 
 
 def state_paths(*, home=None):

@@ -79,7 +79,7 @@ class CodexTaskExecutor:
         self.gateway=gateway;self.hosts=hosts or {};self.postprocessors={}
 
     def register_postprocessor(self,mode,handler,max_seconds):
-        if mode not in ('prepare','publish') or not 1<=max_seconds<=900:
+        if mode not in ('prepare','publish','verify') or not 1<=max_seconds<=900:
             raise ValueError('invalid trusted postprocessor')
         selected=(handler,max_seconds)
         if mode in self.postprocessors and self.postprocessors[mode]!=selected:
@@ -88,25 +88,35 @@ class CodexTaskExecutor:
 
     async def execute(self,task,update,cancelled):
         runtime=self.runtime
-        if self.gateway:
-            capability=task.get('capability') or {}
-            mode=capability.get('mode','generic')
-            plan=capability.get('plan')
-            session=await asyncio.to_thread(self.gateway.create,task['id'],mode,plan)
-            runtime=replace(runtime,base_url=session.model_base_url,access_token=session.model_access_token,
-                            tool_base_url=session.tool_base_url,tool_access_token=session.tool_access_token)
-        mode=(task.get('capability') or {}).get('mode','generic')
+        lease=None
+        capability=task.get('capability') or {}
+        mode=capability.get('mode','generic')
         hook=self.postprocessors.get(mode)
-        service=TaskService(replace(self.task_service.settings,image=self.images[task['image_profile']]),docker_client=self.task_service.docker)
+        if mode=='verify' and (not self.gateway or not hook or not isinstance(task.get('_input_archive'),bytes)):
+            raise ValueError('read-only verification requires gateway, trusted hook and approved input')
+        service=None
         sandbox=cfg=None;outcome={'ok':False,'artifacts':[],'cleanup':{'container_absent':True,'not_created':True}}
         async with self.task_service.lock:
+            if self.gateway:
+                plan=capability.get('plan')
+                if mode=='verify':plan={**plan,'verification_of':capability['source_task_id']}
+                lease=await asyncio.to_thread(self.gateway.create,task['id'],mode,plan)
             try:
+                if lease is not None:
+                    if mode=='verify':
+                        runtime=replace(runtime,tool_base_url=lease.tool_base_url,tool_access_token=lease.tool_access_token)
+                    else:
+                        runtime=replace(runtime,base_url=lease.model_base_url,access_token=lease.model_access_token,
+                                        tool_base_url=lease.tool_base_url,tool_access_token=lease.tool_access_token)
+                service=TaskService(replace(self.task_service.settings,image=self.images[task['image_profile']]),docker_client=self.task_service.docker)
                 await update({'index':0,'status':'running'})
-                sandbox,cfg,details=await service.create(ttl_seconds=runtime.seconds+(hook[1] if hook else 0)+120)
+                sandbox,cfg,details=await service.create(ttl_seconds=(120 if mode=='verify' else runtime.seconds)+(hook[1] if hook else 0)+120)
                 outcome.update(sandbox_id=sandbox.id,runtime=details,cleanup={'container_absent':False})
                 async def command(argv,seconds=30,cwd='/workspace'):
+                    env=runtime.guest_env()
+                    if mode=='verify':env.pop('CHATTASK_CODEX_API_KEY',None)
                     output=await asyncio.wait_for(sandbox.commands.run(shlex.join(argv),opts=RunCommandOpts(
-                        timeout=timedelta(seconds=seconds),working_directory=cwd,envs=runtime.guest_env())),seconds+10)
+                        timeout=timedelta(seconds=seconds),working_directory=cwd,envs=env)),seconds+10)
                     receipt=service.output(output)
                     for key in ['stdout','stderr','error']:
                         if isinstance(receipt.get(key),str):receipt[key]=runtime.redact(receipt[key])
@@ -119,56 +129,59 @@ class CodexTaskExecutor:
                 if runtime.ca_certificate:
                     await sandbox.files.write_file('/workspace/public-ca.pem',runtime.ca_certificate,mode=644)
                     await command(['python','-c','from pathlib import Path; system=Path("/etc/ssl/certs/ca-certificates.crt"); ca=Path("/workspace/public-ca.pem").read_bytes(); original=system.read_bytes(); assert original; system.open("ab").write(b"\\n"+ca); Path("/workspace/task-ca.pem").write_bytes(system.read_bytes())'])
-                await command(['codex','--version'])
+                if mode!='verify':await command(['codex','--version'])
                 if task.get('_input_archive') is not None:
                     await command(['mkdir','-p','/workspace/input'])
                     await sandbox.files.write_file('/workspace/input/previous-result.tar.gz',task['_input_archive'],mode=600)
                 await sandbox.files.write_file('/workspace/task_tools.py',TOOL_CLIENT,mode=600)
                 await sandbox.files.write_file('/workspace/collect_results.py',COLLECTOR,mode=600)
-                prompt=(
-                    'You execute a user task inside an owned container. Work under /workspace/work. '
-                    'Put all deliverables under /workspace/result. Write /workspace/agent-started.txt with your cwd immediately. '
-                    'Never print or copy environment secrets, credentials or authentication files into deliverables. '
-                    'If a task tool service is configured, discover its /tools/catalog with '
-                    '`python /workspace/task_tools.py /tools/catalog`, then call exact listed routes with an optional JSON argument. '
-                    'Use those services for privileged external operations; do not request or recover upstream credentials. '
-                    'An HTTP or tool error is not success; report required approval/blocked operations honestly. '
-                    'Only perform the external actions explicitly described in the user task. '
-                    'This image supplies infrastructure; do not install unrelated infrastructure or alter the host. '
-                    'On completion give a factual final summary with completed results and any blocker. '
-                    'Use shell login=false if supported. If this task selects previous results, they are available as /workspace/input/previous-result.tar.gz.\n\nUSER TASK:\n'+task['instructions'])
-                await sandbox.files.write_file('/workspace/task-prompt.txt',prompt,mode=600)
                 await update({'index':0,'status':'passed','receipt':{'image_profile':task['image_profile'],'runtime':details}})
-                await update({'index':1,'status':'running'})
-                argv=['codex','--disable','unbounded_connection_retries','-c','model_provider="task"',
-                      '-c','model_providers.task.name="Task gateway"','-c','model_providers.task.wire_api="responses"',
-                      '-c','model_providers.task.env_key="CHATTASK_CODEX_API_KEY"',
-                      '-c','model_providers.task.base_url='+json.dumps(runtime.base_url),
-                      '-c','model_providers.task.request_max_retries=1','-c','model_providers.task.stream_max_retries=1',
-                      '-c','model_reasoning_effort="xhigh"','exec','--skip-git-repo-check','--sandbox','danger-full-access',
-                      '--model',runtime.model,'--cd','/workspace/work','--json','--output-last-message','/workspace/agent-final.md','-']
-                shell=shlex.join(argv)+' < /workspace/task-prompt.txt > /workspace/agent-events.jsonl 2> /workspace/agent-stderr.txt'
-                await command(['sh','-c',shell],seconds=runtime.seconds)
-                events=runtime.redact(await sandbox.files.read_file('/workspace/agent-events.jsonl'))
-                session=None;completed=False;failed=False
-                for line in events.splitlines():
-                    try:
-                        event=json.loads(line)
-                        if event.get('type')=='thread.started':session=event.get('thread_id')
-                        if event.get('type')=='turn.completed':completed=True
-                        if event.get('type')=='turn.failed':failed=True
-                    except ValueError:pass
-                outcome['codex_session_id']=session
-                # Preserve the native transcript even if action/readiness verification fails.
-                self._artifact(outcome,'codex.events.jsonl',events.encode()[:1024*1024])
-                final=runtime.redact(await sandbox.files.read_file('/workspace/agent-final.md'))
-                marker=await sandbox.files.read_file('/workspace/agent-started.txt')
-                if not session or not completed or failed or not marker.strip() or not final.strip():raise RuntimeError('Codex execution did not meet the native completion/write contract')
-                if cancelled():raise RuntimeError('task cancellation requested')
-                outcome['final']=final[:16000]
-                self._artifact(outcome,'result.md',final.encode()[:1000000])
-                await update({'index':1,'status':'passed','receipt':{'session_id':session,'startup_marker':marker[:200],'native_turn_completed':True}})
-                await update({'index':2,'status':'running'})
+                if mode!='verify':
+                    prompt=(
+                        'You execute a user task inside an owned container. Work under /workspace/work. '
+                        'Put all deliverables under /workspace/result. Write /workspace/agent-started.txt with your cwd immediately. '
+                        'Never print or copy environment secrets, credentials or authentication files into deliverables. '
+                        'If a task tool service is configured, discover its /tools/catalog with '
+                        '`python /workspace/task_tools.py /tools/catalog`, then call exact listed routes with an optional JSON argument. '
+                        'Use those services for privileged external operations; do not request or recover upstream credentials. '
+                        'An HTTP or tool error is not success; report required approval/blocked operations honestly. '
+                        'Only perform the external actions explicitly described in the user task. '
+                        'This image supplies infrastructure; do not install unrelated infrastructure or alter the host. '
+                        'On completion give a factual final summary with completed results and any blocker. '
+                        'Use shell login=false if supported. If this task selects previous results, they are available as /workspace/input/previous-result.tar.gz.\n\nUSER TASK:\n'+task['instructions'])
+                    await sandbox.files.write_file('/workspace/task-prompt.txt',prompt,mode=600)
+                    await update({'index':1,'status':'running'})
+                    argv=['codex','--disable','unbounded_connection_retries','-c','model_provider="task"',
+                          '-c','model_providers.task.name="Task gateway"','-c','model_providers.task.wire_api="responses"',
+                          '-c','model_providers.task.env_key="CHATTASK_CODEX_API_KEY"',
+                          '-c','model_providers.task.base_url='+json.dumps(runtime.base_url),
+                          '-c','model_providers.task.request_max_retries=1','-c','model_providers.task.stream_max_retries=1',
+                          '-c','model_reasoning_effort="xhigh"','exec','--skip-git-repo-check','--sandbox','danger-full-access',
+                          '--model',runtime.model,'--cd','/workspace/work','--json','--output-last-message','/workspace/agent-final.md','-']
+                    shell=shlex.join(argv)+' < /workspace/task-prompt.txt > /workspace/agent-events.jsonl 2> /workspace/agent-stderr.txt'
+                    await command(['sh','-c',shell],seconds=runtime.seconds)
+                    events=runtime.redact(await sandbox.files.read_file('/workspace/agent-events.jsonl'))
+                    session=None;completed=False;failed=False
+                    for line in events.splitlines():
+                        try:
+                            event=json.loads(line)
+                            if event.get('type')=='thread.started':session=event.get('thread_id')
+                            if event.get('type')=='turn.completed':completed=True
+                            if event.get('type')=='turn.failed':failed=True
+                        except ValueError:pass
+                    outcome['codex_session_id']=session
+                    # Preserve the native transcript even if action/readiness verification fails.
+                    self._artifact(outcome,'codex.events.jsonl',events.encode()[:1024*1024])
+                    final=runtime.redact(await sandbox.files.read_file('/workspace/agent-final.md'))
+                    marker=await sandbox.files.read_file('/workspace/agent-started.txt')
+                    if not session or not completed or failed or not marker.strip() or not final.strip():raise RuntimeError('Codex execution did not meet the native completion/write contract')
+                    if cancelled():raise RuntimeError('task cancellation requested')
+                    outcome['final']=final[:16000]
+                    self._artifact(outcome,'result.md',final.encode()[:1000000])
+                    await update({'index':1,'status':'passed','receipt':{'session_id':session,'startup_marker':marker[:200],'native_turn_completed':True}})
+                    await update({'index':2,'status':'running'})
+                else:
+                    await update({'index':1,'status':'running'})
                 if hook:
                     await hook[0](sandbox,command,task,outcome,self._artifact,runtime)
                 collection=await command(['python','/workspace/collect_results.py'])
@@ -183,11 +196,13 @@ class CodexTaskExecutor:
                         body=archive.extractfile(member).read()
                         if any(secret and (secret.encode() in body or base64.b64encode(secret.encode()) in body) for secret in (runtime.access_token,runtime.tool_access_token)):raise RuntimeError('task credential appeared in results')
                 self._artifact(outcome,'result.tar.gz',data)
-                await update({'index':2,'status':'passed','receipt':json.loads(collection['stdout'])})
+                await update({'index':1 if mode=='verify' else 2,'status':'passed','receipt':json.loads(collection['stdout'])})
+                if mode=='verify':
+                    outcome['final']='Read-only trusted publication verification passed.'
                 outcome['ok']=True
             except Exception as exc:
                 outcome['error']=runtime.redact(str(exc))[:1800]
-                if sandbox is not None:
+                if sandbox is not None and mode!='verify':
                     if not any(a['name']=='codex.events.jsonl' for a in outcome['artifacts']):
                         try:
                             partial=runtime.redact(await sandbox.files.read_file('/workspace/agent-events.jsonl'))
@@ -202,6 +217,15 @@ class CodexTaskExecutor:
                         outcome['cleanup']={'requested':True,'container_absent':not any(c.name=='sandbox-'+sandbox.id for c in service.docker.containers.list(all=True))}
                     except Exception:outcome['cleanup']={'requested':True,'container_absent':False}
                     if not outcome['cleanup']['container_absent']:outcome['ok']=False
+                if lease is not None:
+                    try:
+                        closed=await asyncio.to_thread(self.gateway.close,task['id'])
+                        if closed!={'closed':True}:raise ValueError('lease closure unconfirmed')
+                        outcome['credential_closure']={'closed':True}
+                    except Exception as exc:
+                        outcome['credential_closure']={'closed':False,'error':type(exc).__name__}
+                        outcome.setdefault('error','gateway lease closure unconfirmed')
+                        outcome['ok']=False
         return outcome
 
     @staticmethod

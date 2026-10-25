@@ -196,7 +196,7 @@ class PackageLiveTests(unittest.TestCase):
             executor=Executor()
         with tempfile.TemporaryDirectory(dir=os.environ['CHATTASK_TEST_SCRATCH']) as root:
             PackageService(TaskStore(root),Tasks())
-        self.assertEqual(set(Tasks.executor.hooks),{'prepare','publish'})
+        self.assertEqual(set(Tasks.executor.hooks),{'prepare','publish','verify'})
         self.assertNotIn('generic',Tasks.executor.hooks)
 
     def test_publish_postprocessor_rechecks_approved_input_digest(self):

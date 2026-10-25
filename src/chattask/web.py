@@ -40,7 +40,10 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
     agent_tasks = agent_tasks if agent_tasks is not None else AgentTaskService(workflow.store, configured_executor(settings, service))
     from .package_service import PackageService
     from .package_template import form_schema, intent_prefill
-    packages = PackageService(workflow.store, agent_tasks, broker_required=True)
+    public_dependencies=getattr(getattr(workflow,'executor',None),'dependency_archive',None)
+    if public_dependencies is None:
+        public_dependencies=load_guest_dependencies(settings)
+    packages = PackageService(workflow.store, agent_tasks, broker_required=True,public_dependencies=public_dependencies)
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await workflow.recover()
@@ -266,6 +269,15 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
     async def package_confirm(request: Request, draft_id: str, body: dict):
         try:
             return await packages.confirm(await owner(request), draft_id, body)
+        except (KeyError, FileNotFoundError):
+            raise HTTPException(404, detail='draft not found')
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc))
+
+    @app.post('/api/package/drafts/{draft_id}/recheck')
+    async def package_recheck(request: Request, draft_id: str, body: dict):
+        try:
+            return await packages.recheck(await owner(request), draft_id, body)
         except (KeyError, FileNotFoundError):
             raise HTTPException(404, detail='draft not found')
         except ValueError as exc:

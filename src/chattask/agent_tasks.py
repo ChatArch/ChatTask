@@ -37,10 +37,15 @@ class AgentTaskService:
         return await self._create(owner,body,None)
 
     async def create_internal(self,owner,body,capability):
-        if not isinstance(capability,dict) or capability.get('mode') not in ('prepare','publish') or not isinstance(capability.get('plan'),dict):
+        if not isinstance(capability,dict) or capability.get('mode') not in ('prepare','publish','verify') or not isinstance(capability.get('plan'),dict):
             raise ValueError('invalid internal capability')
         if capability['mode']=='prepare' and set(capability)!={'mode','plan'} or capability['mode']=='publish' and (set(capability)!={'mode','plan','spec','plan_sha256'} or not isinstance(capability['spec'],dict) or not isinstance(capability['plan_sha256'],str) or not re.fullmatch('[0-9a-f]{64}',capability['plan_sha256'])):
             raise ValueError('invalid internal capability')
+        if capability['mode']=='verify' and (set(capability)!={'mode','plan','spec','plan_sha256','source_task_id'} or
+            not isinstance(capability['spec'],dict) or not isinstance(capability['plan_sha256'],str) or
+            not re.fullmatch('[0-9a-f]{64}',capability['plan_sha256']) or
+            not isinstance(capability['source_task_id'],str) or not re.fullmatch('[a-f0-9]{32}',capability['source_task_id'])):
+            raise ValueError('invalid internal verify capability')
         return await self._create(owner,body,capability)
 
     async def _create(self,owner,body,capability):
@@ -67,7 +72,7 @@ class AgentTaskService:
             task={'id':ident,'owner':owner,'engine':'codex','template_id':'codex-task','template_revision':1,
                   'request_id':request_id,'request_fingerprint':digest,'instructions':instructions,
                   'image_profile':image,'status':'queued','created_at':now(),'updated_at':now(),
-                  'steps':[{'kind':kind,'status':'pending'} for kind in ['prepare','codex','collect']],
+                  'steps':[{'kind':kind,'status':'pending'} for kind in (['sandbox','trusted_validation'] if capability and capability['mode']=='verify' else ['prepare','codex','collect'])],
                   'result':None,'artifacts':[],'cleanup':None,'input_task_id':input_task_id,'capability':capability}
             self.store.put('runs',ident,task)
         self.tasks[ident]=asyncio.create_task(self._execute(ident))
@@ -96,7 +101,7 @@ class AgentTaskService:
             for item in result.get('artifacts',[]):
                 clean={k:v for k,v in item.items() if k!='data'}
                 self.store.put_artifact(ident,item['name'],item['data']);current['artifacts'].append(clean)
-            for key in ['sandbox_id','runtime','codex_session_id','cleanup','error','diagnostic']:
+            for key in ['sandbox_id','runtime','codex_session_id','cleanup','credential_closure','error','diagnostic']:
                 if key in result:current[key]=result[key]
             current['result']=result.get('final')
             cancelled=current['status']=='cancel_requested'

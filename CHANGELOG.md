@@ -1,19 +1,16 @@
 # 更新记录
 
-## 0.1.0 — 2026-10-23
+## 0.1.0
 
-- 增加版本化任务模板、CLI受信仓库登记、私有原子运行/步骤/产物账本、刷新重连与中断恢复标记。
-- 增加ChatPyPI元数据工具连接、真实Sandbox测试/构建/Twine检查、SHA256产物下载与合作式取消。
-- 增加针对已合并PR/精确检查的显式GitHub标签批准；标签后等待OIDC和PyPI独立核验，不伪报发布。
-- 批准绑定源码提交及树，要求合并PR、精确`test` CI/CI工作流和合版树均与预检一致；校验产物分发名与探测包名一致。
-- 从固定Git blob构造Sandbox源码归档，不受`export-ignore`/`export-subst`属性影响；CI检查必须可关联到仓库自己的`ci.yml`工作流。
-- 新网页将模板设为主入口，保留旧整数Task与持续Shell实验。
-
-- 增加可导入的 TaskSettings、TaskService、create_app 与 state_paths；导入不安装或启动服务。
-- 复用 OpenSandbox 创建执行环境、生成/测试固定统计程序、维持有期限的 Bash 会话并回收；这不是通用自然语言 Agent。
-- 增加包内浏览器页面与同源 API、ChatLogin 认证/CSRF、ChatEnv typed profile。
-- 增加真实 serve 和 paths 命令；服务准备与 Docker/Python 安装仍由 ChatUp 或既有运行环境负责。
-- 普通 Docker/runc 仅供受信用户实验，不声明强隔离或多租户生产能力。
+- 新增通用任务入口：任务说明和镜像配置 → Sandbox 内 Codex → 持久结果；CLI、Python API 与网页复用执行器。
+- 新增参数化 Python 发包模板：一句话进入选择/填写表单，保存草稿、执行只读预检，再按精确快照确认发布。参数修改使旧预检和确认失效。
+- 新增每任务独立的受限网关会话与可选公有 CA 信任。模型/工具凭据分开，控制凭据和原始上游凭据不进入 Sandbox。
+- 发包后处理核对源码清单、PR/合版、精确 CI、真实 OIDC 上传、PyPI 文件摘要和干净安装；原生 Agent 结束或绿色工作流不单独代表发布成功。
+- 新增持久、归属检查和幂等请求的任务/草稿账本、摘要校验下载；刷新保留未保存文本，身份失效清除私有页面状态；重启标记中断且不自动重放外部写入。
+- 保留版本化声明式预检模板、受信仓库登记、整数统计示例和有期限的持续 Bash 实验；Python 发包不硬编码到通用执行器。
+- 发布批准绑定源码提交及树；精确 `test` 检查必须关联本仓库 `ci.yml`，合版树与预检树必须相同。固定 Git blob 归档不受 `export-ignore`/`export-subst` 影响。
+- 提供 `TaskSettings`、`TaskService`、`create_app`、`state_paths` 和共享任务 API；导入不安装或启动服务。真实 CLI 树包含 `run`、`package`、`serve`、`paths` 与受信仓库管理。
+- 复用 OpenSandbox、ChatEnv、ChatLogin、ChatPyPI 和 ChatGH；服务/镜像准备由既有基础设施负责。普通 Docker/runc 仅供受信用户，不声明敌对多租户强隔离。
 
 ## 0.0.2 — 2026-09-14
 

@@ -36,6 +36,16 @@ class TaskSettings:
     tool_profile: str='task-tools'
     public_deps_path: str=''
     public_deps_sha256: str=''
+    codex_base_url: str=''
+    codex_api_key: str=field(default='',repr=False)
+    codex_model: str='gpt-6-sol'
+    codex_images: str='{}'
+    codex_tools_url: str=''
+    codex_tools_token: str=field(default='',repr=False)
+    gateway_url: str=''
+    gateway_client_token: str=field(default='',repr=False)
+    gateway_ca_file: str=''
+    codex_hosts: str='{}'
 
     def __post_init__(self):
         object.__setattr__(self,'endpoint',_origin(self.endpoint))
@@ -44,6 +54,14 @@ class TaskSettings:
             raise ValueError('OpenSandbox API key is required')
         if not isinstance(self.image,str) or not self.image or len(self.image)>256:
             raise ValueError('Invalid workload image')
+        if bool(self.gateway_url) != bool(self.gateway_client_token):
+            raise ValueError('gateway URL and client token must be configured together')
+        if self.gateway_url:
+            from .broker import _https
+            if urlsplit(_https(self.gateway_url)).path not in ('','/'):
+                raise ValueError('gateway must be an HTTPS origin')
+        if self.gateway_ca_file and (not self.gateway_url or not Path(self.gateway_ca_file).is_absolute()):
+            raise ValueError('gateway CA requires HTTPS gateway and absolute file path')
         if bool(self.public_deps_path) != bool(self.public_deps_sha256):
             raise ValueError('public dependency archive requires a pinned digest and absolute path')
         if self.public_deps_path and (not Path(self.public_deps_path).is_absolute() or
@@ -99,4 +117,14 @@ def load_settings(*,profile: str | None=None,home: str | Path | None=None,overri
                         password=resolved.get('CHATTASK_LOGIN_PASSWORD') or '',image=resolved['CHATTASK_IMAGE'],home=home,
                         tool_profile=resolved['CHATTASK_TOOL_PROFILE'],
                         public_deps_path=resolved.get('CHATTASK_PUBLIC_DEPS_PATH') or '',
-                        public_deps_sha256=resolved.get('CHATTASK_PUBLIC_DEPS_SHA256') or '')
+                        public_deps_sha256=resolved.get('CHATTASK_PUBLIC_DEPS_SHA256') or '',
+                        codex_base_url=resolved.get('CHATTASK_CODEX_BASE_URL') or '',
+                        codex_api_key=resolved.get('CHATTASK_CODEX_API_KEY') or '',
+                        codex_model=resolved.get('CHATTASK_CODEX_MODEL') or 'gpt-6-sol',
+                        codex_images=resolved.get('CHATTASK_CODEX_IMAGES') or '{}',
+                        codex_tools_url=resolved.get('CHATTASK_CODEX_TOOLS_URL') or '',
+                        codex_tools_token=resolved.get('CHATTASK_CODEX_TOOLS_TOKEN') or '',
+                        gateway_url=resolved.get('CHATTASK_GATEWAY_URL') or '',
+                        gateway_client_token=resolved.get('CHATTASK_GATEWAY_CLIENT_TOKEN') or '',
+                        gateway_ca_file=resolved.get('CHATTASK_GATEWAY_CA_FILE') or '',
+                        codex_hosts=resolved.get('CHATTASK_CODEX_HOSTS') or '{}')

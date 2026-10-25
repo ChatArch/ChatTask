@@ -39,6 +39,7 @@ plugins:
             CLI 树: CLI Tree
             能力地图: Capability Map
             Python 接口树: Python Interface Tree
+            通用任务与镜像: Generic Tasks and Images
 markdown_extensions:
   - admonition
   - attr_list
@@ -62,6 +63,7 @@ extra:
       lang: en
 nav:
   - 首页: index.md
+  - 通用任务与镜像: tasks.md
   - 命令与接口:
       - CLI 树: cli-tree.md
       - 能力地图: capability-map.md

@@ -30,7 +30,11 @@ async function request(path, method = 'GET', body) {
     throw new Error('登录已失效，请重新登录。');
   }
   const payload = await response.json();
-  if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : `HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(typeof payload.detail === 'string' ? payload.detail : `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return payload;
 }
 function show(id, text, error = false) {
@@ -131,6 +135,8 @@ controls(false);
     $('account-state').textContent = state.user.display_name || '已登录';
     controls(false);
     await initializeTemplates();
+    await initializeAgentTasks();
+    await initializePackages();
   } catch (e) { show('task-state', '无法确认登录状态，请刷新后重试。', true); } deployTemplateControls();
 })();
 
@@ -144,6 +150,8 @@ let refreshTimer = null;
 const activeStatuses = new Set(['queued', 'running', 'cancel_requested', 'releasing']);
 
 function clearTemplateState() {
+  clearAgentState();
+  clearPackageState();
   templates = []; repositories = []; selectedRun = null; pendingCreate = null;
   sessionStorage.removeItem('chattask-pending-run');
   if (refreshTimer) clearTimeout(refreshTimer);
@@ -172,11 +180,17 @@ function option(value, label) {
 }
 function approvalPhrase(run) { return `TAG ${run.github_repo} v${run.version}`; }
 function selectTab(key) {
+  $('agent-view').hidden = key !== 'agent';
+  $('agent-tab').setAttribute('aria-selected', String(key === 'agent'));
+  $('package-view').hidden = key !== 'package';
+  $('package-tab').setAttribute('aria-selected', String(key === 'package'));
   $('template-view').hidden = key !== 'templates';
   $('sandbox-view').hidden = key !== 'sandbox';
   $('templates-tab').setAttribute('aria-selected', String(key === 'templates'));
   $('sandbox-tab').setAttribute('aria-selected', String(key === 'sandbox'));
 }
+$('agent-tab').addEventListener('click', () => selectTab('agent'));
+$('package-tab').addEventListener('click', () => selectTab('package'));
 $('templates-tab').addEventListener('click', () => selectTab('templates'));
 $('sandbox-tab').addEventListener('click', () => selectTab('sandbox'));
 
@@ -191,7 +205,7 @@ async function initializeTemplates() {
     const repos = $('repository-picker'); repos.replaceChildren();
     repositories.forEach(r => repos.append(option(r.id, `${r.id} · ${r.github_repo}`)));
     renderTemplateSelection();
-    renderHistory(history.runs);
+    renderHistory(history.runs.filter(r => r.engine !== 'codex'));
     const stored = sessionStorage.getItem('chattask-pending-run');
     if (stored) {
       try { pendingCreate = JSON.parse(stored); } catch (_) { sessionStorage.removeItem('chattask-pending-run'); }
@@ -321,7 +335,7 @@ function renderRun(run) {
   for (const artifact of run.artifacts || []) {
     const item = document.createElement('div');
     const link = document.createElement('a');
-    link.href = `/api/runs/${encodeURIComponent(run.id)}/artifacts/${encodeURIComponent(artifact.name)}`;
+    link.href = `/api/agent/tasks/${encodeURIComponent(run.id)}/artifacts/${encodeURIComponent(artifact.name)}`;
     link.textContent = `下载 ${artifact.name} · ${artifact.size} bytes`;
     const digest = document.createElement('code'); digest.textContent = `SHA256 ${artifact.sha256}`;
     item.append(link, digest); artifactList.append(item);
@@ -405,3 +419,357 @@ $('approve-run').addEventListener('click', async () => {
   } finally { templateBusy = false; deployTemplateControls(); }
 });
 deployTemplateControls();
+
+// Generic tasks: instruction + image profile -> Codex/Sandbox -> persisted result.
+let agentSelected = null;
+let agentPoll = null;
+let agentGeneration = 0;
+let agentPending = null;
+function clearAgentState() {
+  agentGeneration += 1;
+  if (agentPoll) clearTimeout(agentPoll);
+  agentPoll = null; agentSelected = null; agentPending = null;
+  sessionStorage.removeItem('chattask-agent-pending');
+  $('agent-instructions').value = '';
+  $('agent-result').textContent = '';
+  $('agent-artifacts').replaceChildren();
+  $('agent-history').replaceChildren();
+  $('agent-create').disabled = true;
+}
+async function initializeAgentTasks() {
+  const generation = agentGeneration;
+  try {
+    const [images, history] = await Promise.all([request('/api/agent/images'), request('/api/agent/tasks')]);
+    if (!authenticated || generation !== agentGeneration) return;
+    $('agent-image').replaceChildren();
+    images.images.forEach(image => $('agent-image').append(option(image.id, image.id)));
+    $('agent-create').disabled = !images.images.length;
+    show('agent-create-state', images.images.length ? '选择镜像并说明任务；无需指定仓库或版本。' : '执行器尚未配置：请管理员设置 Codex 网关与镜像配置。', !images.images.length);
+    const pending = sessionStorage.getItem('chattask-agent-pending');
+    if (pending) { try { agentPending = JSON.parse(pending); } catch (_) { sessionStorage.removeItem('chattask-agent-pending'); } }
+    renderAgentHistory(history.tasks);
+    if (history.tasks.length) await loadAgentTask(history.tasks[0].id);
+  } catch (error) { show('agent-create-state', error.message, true); }
+}
+function renderAgentHistory(tasks) {
+  const picker = $('agent-history'); picker.replaceChildren(option('', '选择任务'));
+  [...tasks].sort((a,b) => b.created_at.localeCompare(a.created_at)).forEach(task =>
+    picker.append(option(task.id, `${String(task.instructions || task.template_id || '既有任务').slice(0, 28)} · ${task.status}`)));
+  if (agentSelected) picker.value = agentSelected.id;
+}
+async function loadAgentTask(id) {
+  if (!id) return;
+  const generation = agentGeneration;
+  try {
+    const task = await request(`/api/agent/tasks/${id}`);
+    if (!authenticated || generation !== agentGeneration) return;
+    agentSelected = task; $('agent-history').value = task.id;
+    const states = {queued:'排队中', running:'Codex 正在 Sandbox 中执行', completed:'执行结束', blocked:'执行受阻', interrupted:'执行中断', cancelled:'已取消', cancel_requested:'等待安全取消'};
+    show('agent-state', `${states[task.status] || task.status} · ${task.image_profile} · ${task.id.slice(0,8)}${task.cleanup?.container_absent ? ' · 环境已回收' : ''}`, task.status === 'blocked');
+    $('agent-result').textContent = task.result || task.error || task.steps.map(s => `${s.kind}: ${s.status}`).join('\n');
+    $('agent-artifacts').replaceChildren();
+    (task.artifacts || []).forEach(item => {
+      const link = document.createElement('a'); link.href = `/api/agent/tasks/${task.id}/artifacts/${encodeURIComponent(item.name)}`;
+      link.textContent = `${item.name} · ${item.size} bytes`; link.download = item.name;
+      $('agent-artifacts').append(link);
+    });
+    if (agentPoll) clearTimeout(agentPoll);
+    if (['queued','running','cancel_requested'].includes(task.status)) agentPoll = setTimeout(() => loadAgentTask(task.id), 1800);
+  } catch (error) { show('agent-state', `结果暂未确认：${error.message}`, true); }
+}
+$('agent-create').addEventListener('click', async () => {
+  if (!authenticated) return;
+  const instructions = $('agent-instructions').value.trim();
+  if (!agentPending && !instructions) return show('agent-create-state', '请填写任务说明。', true);
+  if (!agentPending && /发(?:一?个)?\s*(?:Python\s*)?包|(?:发布|新建|创建).*(?:Python|python|包)|(?:publish|release).*\b(?:python|package)\b/i.test(instructions)) {
+    try { await beginPackageIntent(instructions); }
+    catch (error) { show('agent-create-state', error.message, true); }
+    return;
+  }
+  if (!agentPending) agentPending = {request_id: crypto.randomUUID(), instructions, image_profile: $('agent-image').value};
+  sessionStorage.setItem('chattask-agent-pending', JSON.stringify(agentPending));
+  $('agent-create').disabled = true; show('agent-create-state', '正在创建任务…');
+  try {
+    const task = await request('/api/agent/tasks', 'POST', agentPending);
+    agentPending = null; sessionStorage.removeItem('chattask-agent-pending');
+    show('agent-create-state', '任务已创建；关闭页面不会撤销任务。');
+    const history = await request('/api/agent/tasks');
+    if (!authenticated) return;
+    renderAgentHistory(history.tasks); await loadAgentTask(task.id);
+  } catch (error) { show('agent-create-state', `创建结果尚未确认：${error.message}。再次点击将核对同一请求。`, true); }
+  finally { $('agent-create').disabled = !authenticated || !$('agent-image').value; }
+});
+$('agent-history').addEventListener('change', () => loadAgentTask($('agent-history').value));
+$('agent-refresh').addEventListener('click', () => agentSelected ? loadAgentTask(agentSelected.id) : initializeAgentTasks());
+
+
+// Versioned package form. No package permission or policy is accepted from browser input.
+let packageSchema = null;
+let packageDraft = null;
+let packagePoll = null;
+let packagePending = null;
+let packageBusy = false;
+let packageGeneration = 0;
+let packageLoadSequence = 0;
+const packagePendingKey = 'chattask-package-pending';
+function clearPackageState() {
+  packageGeneration++; packageLoadSequence++;
+  if (packagePoll) clearTimeout(packagePoll);
+  packagePoll = null; packageDraft = null; packageSchema = null; packageBusy = false;
+  packagePendingSet(null);
+  $('package-fields').replaceChildren(); $('package-history').replaceChildren();
+  $('package-artifacts').replaceChildren(); $('package-image').replaceChildren();
+  for (const id of ['package-link','package-progress','package-preview','package-state']) $(id).textContent = '';
+  $('package-intent').value = ''; $('package-confirm-text').checked = false;
+  $('package-confirm-box').hidden = true;
+  for (const id of ['package-save','package-prepare','package-confirm','package-prefill','package-retry-confirm']) $(id).disabled = true;
+}
+function suggestPackageFields() {
+  const value = $('pkg-package_name')?.value || '';
+  if (!/^[A-Za-z][A-Za-z0-9._-]*$/.test(value)) return;
+  const suggestions = {module:value.toLowerCase().replace(/[-.]+/g,'_'),cli:value.toLowerCase().replace(/[_.]+/g,'-'),repository:value};
+  for (const [key, suggestion] of Object.entries(suggestions)) {
+    const input = $('pkg-' + key);
+    if (input && (!input.value || input.value === input.dataset.suggested)) { input.value = suggestion; input.dataset.suggested = suggestion; }
+  }
+}
+async function beginPackageIntent(text) {
+  if (text.length > 500) throw new Error('发包一句话最多 500 字；详细要求可在参数表单中填写。');
+  if (packageBusy || packagePending || packageDraft && packageDirty()) throw new Error('请先保存或放弃当前发包草稿，再开始新需求。');
+  if (!packageSchema) await initializePackages();
+  if (!packageSchema) throw new Error('模板尚未加载，请重试。');
+  const generation = packageGeneration;
+  const value = await request('/api/package/intent','POST',{text});
+  if (!authenticated || generation !== packageGeneration) return;
+  await loadPackage(''); $('package-tab').click(); $('package-intent').value = text;
+  fillPackage({...packageSchema.defaults,mode:'new',...value.prefill,description:text,requirements:text});
+  suggestPackageFields(); $('package-confirm-box').hidden = true;
+  $('package-view').scrollIntoView({block:'start',behavior:'smooth'});
+  $('package-preview').textContent = '补充并确认参数后保存草稿，再运行发布前检查。';
+  show('package-state','已识别发包需求。请核对参数；现在还不会创建仓库或发布。');
+}
+function packageFields() {
+  const spec = {};
+  if (!packageSchema) return spec;
+  packageSchema.fields.forEach(field => { spec[field.name] = $('pkg-' + field.name).value.trim(); });
+  return spec;
+}
+function packageDirty() {
+  return !!packageDraft && JSON.stringify(packageFields()) !== JSON.stringify(packageDraft.spec);
+}
+function packageControls() {
+  const hasDraft = !!packageDraft;
+  const dirty = packageDirty();
+  const submitted = hasDraft && !!packageDraft.publish_task_id;
+  $('package-history').disabled = packageBusy || !!packagePending;
+  $('package-save').disabled = !authenticated || packageBusy || submitted || !packageSchema;
+  $('package-prepare').disabled = !authenticated || packageBusy || !hasDraft || dirty || submitted || !packageSchema?.available ||
+    ['queued','running','cancel_requested'].includes(packageDraft.prepare_status);
+  $('package-prefill').disabled = !authenticated || packageBusy;
+  $('package-confirm').disabled = !authenticated || packageBusy || !hasDraft || dirty || !packageSchema?.available ||
+    !packageDraft.preview || submitted || !$('package-confirm-text').checked;
+  $('package-retry-confirm').disabled = !authenticated || packageBusy || !hasDraft ||
+    packageDraft.publish_error !== 'GatewayUnknown';
+}
+function packagePendingSet(value) {
+  packagePending = value;
+  if (value) sessionStorage.setItem(packagePendingKey, JSON.stringify(value));
+  else sessionStorage.removeItem(packagePendingKey);
+}
+async function packageMutation(kind, path, method, body) {
+  const generation = packageGeneration;
+  packageLoadSequence++;
+  if (packagePoll) clearTimeout(packagePoll);
+  if (packagePending && packagePending.kind !== kind) throw new Error('上一次请求结果未确认；请先重试同一操作。');
+  const pending = packagePending || {kind, path, method, body};
+  if (!packagePending) packagePendingSet(pending);
+  try {
+    const result = await request(pending.path, pending.method, pending.body);
+    if (!authenticated || generation !== packageGeneration) throw new Error('身份已变化，请重新读取草稿。');
+    packagePendingSet(null);
+    return result;
+  } catch (error) {
+    // Authoritative input/permission rejection is not an uncertain mutation.
+    if (error.status >= 400 && error.status < 500) packagePendingSet(null);
+    throw error;
+  }
+}
+function fillPackage(spec) {
+  packageSchema.fields.forEach(field => { $('pkg-' + field.name).value = spec[field.name] || ''; });
+  packageControls();
+}
+function renderPackage(draft) {
+  if (!authenticated) return;
+  if (!draft.preview || packageDraft?.preview?.preview_sha256 !== draft.preview.preview_sha256) $('package-confirm-text').checked = false;
+  packageDraft = draft;
+  $('package-history').value = draft.id;
+  history.replaceState(null, '', '#package=' + draft.id);
+  $('package-link').textContent = '草稿链接：' + location.href + ' · 修订 ' + draft.revision + ' · ' + draft.fingerprint;
+  const dirty = packageDirty();
+  const prep = draft.prepare_task_id ? '预检任务 ' + draft.prepare_task_id + ' · ' + (draft.prepare_status || '可刷新') : '尚未预检';
+  const pub = draft.publish_task_id ? '；发布任务 ' + draft.publish_task_id + ' · ' + (draft.publish_status || '可刷新') : '';
+  show('package-progress', prep + pub + (dirty ? '；参数有未保存修改' : ''));
+  const preview = draft.preview;
+  $('package-confirm-box').hidden = !preview || !!draft.publish_task_id || dirty;
+  $('package-retry-confirm').hidden = draft.publish_error !== 'GatewayUnknown';
+  $('package-confirm-target').textContent = preview ? preview.policy.repository + ' · ' + preview.policy.tag : '';
+  if (preview) {
+    $('package-preview').textContent = JSON.stringify({
+      target: preview.policy.repository, project: preview.policy.project, version: preview.policy.version,
+      actions: preview.policy.actions, revision: preview.revision, preparation_task: preview.task_id,
+      plan_sha256: preview.plan_sha256, archive_sha256: preview.archive_sha256,
+      source_manifests: preview.source_manifests, artifact_digests: preview.artifact_digests,
+      validation: preview.validation
+    }, null, 2);
+  } else $('package-preview').textContent = draft.prepare_task_id ?
+    '预检任务正在执行或结果尚未验证。刷新后查看精确目标与产物摘要。' : '请先保存草稿并运行预检。';
+  $('package-artifacts').replaceChildren();
+  for (const id of [draft.prepare_task_id, draft.publish_task_id]) {
+    if (!id) continue;
+    const a = document.createElement('a');
+    a.href = '/api/agent/tasks/' + id;
+    a.textContent = (id === draft.prepare_task_id ? '预检' : '发布') + '任务状态 · ' + id;
+    a.target = '_blank'; a.rel = 'noopener';
+    $('package-artifacts').append(a);
+    const download = document.createElement('a');
+    download.href = '/api/agent/tasks/' + id + '/artifacts/result.tar.gz';
+    download.textContent = '下载任务产物 · ' + id.slice(0, 8);
+    $('package-artifacts').append(download);
+  }
+  if (draft.prepare_error) show('package-state', '预检验证受阻：' + draft.prepare_error, true);
+  if (draft.publish_result) show('package-state', '任务结果：' + draft.publish_result);
+  else if (draft.publish_error) show('package-state', '发布任务受阻：' + draft.publish_error, true);
+  packageControls();
+  if (packagePoll) clearTimeout(packagePoll);
+  if (draft.prepare_task_id && !preview && ['queued','running','cancel_requested'].includes(draft.prepare_status))
+    packagePoll = setTimeout(() => loadPackage(draft.id), 2500);
+  if (draft.publish_task_id && ['queued','running','cancel_requested'].includes(draft.publish_status))
+    packagePoll = setTimeout(() => loadPackage(draft.id), 2500);
+}
+async function loadPackage(id) {
+  if (!id) {
+    packageLoadSequence++; packageDraft = null;
+    if (packagePoll) clearTimeout(packagePoll);
+    history.replaceState(null, '', location.pathname); $('package-link').textContent = '';
+    fillPackage({...packageSchema.defaults,mode:'new'}); $('package-preview').textContent = '请先保存草稿并运行预检。';
+    $('package-progress').textContent = ''; $('package-artifacts').replaceChildren();
+    $('package-confirm-text').checked = false; $('package-confirm-box').hidden = true;
+    packageControls(); return;
+  }
+  const generation = packageGeneration; const sequence = ++packageLoadSequence;
+  try {
+    const draft = await request('/api/package/drafts/' + id);
+    if (!authenticated || generation !== packageGeneration || sequence !== packageLoadSequence) return;
+    if (!(packageDraft?.id === id && packageDirty())) fillPackage(draft.spec);
+    renderPackage(draft);
+  } catch (error) { show('package-state', '读取草稿失败：' + error.message, true); }
+}
+async function packageHistory() {
+  const generation = packageGeneration;
+  const data = await request('/api/package/drafts');
+  if (!authenticated || generation !== packageGeneration) return;
+  $('package-history').replaceChildren(option('', '新草稿'));
+  data.drafts.forEach(draft => $('package-history').append(option(draft.id, draft.spec.package_name + ' · 修订 ' + draft.revision)));
+  if (packageDraft) $('package-history').value = packageDraft.id;
+}
+async function initializePackages() {
+  const generation = packageGeneration;
+  try {
+    packageSchema = await request('/api/package/schema');
+    if (!authenticated || generation !== packageGeneration) { packageSchema = null; return; }
+    const fields = $('package-fields'); fields.replaceChildren();
+    packageSchema.fields.forEach(field => {
+      const label = document.createElement('label'); label.htmlFor = 'pkg-' + field.name; label.textContent = field.label;
+      fields.append(label);
+      let input;
+      if (field.type === 'choice') {
+        input = document.createElement('select');
+        const labels = {new:'新建包（含仓库与 Publisher）',existing:'已有项目发新版',bilingual_mkdocs:'中英文 MkDocs',none:'不生成文档'};
+        field.choices.forEach(choice => input.append(option(choice, labels[choice] || choice)));
+      } else input = document.createElement(field.type === 'textarea' ? 'textarea' : 'input');
+      input.id = 'pkg-' + field.name; input.value = field.default || '';
+      input.addEventListener('input', () => { if (field.name === 'package_name') suggestPackageFields(); packageControls(); });
+      fields.append(input);
+    });
+    $('package-image').replaceChildren();
+    const images = await request('/api/agent/images');
+    if (!authenticated || generation !== packageGeneration) return;
+    images.images.forEach(image => $('package-image').append(option(image.id, image.id)));
+    await packageHistory();
+    try { packagePending = JSON.parse(sessionStorage.getItem(packagePendingKey) || 'null'); }
+    catch (_) { packagePendingSet(null); }
+    const match = /^#package=([a-f0-9]{32})$/.exec(location.hash);
+    if (match) { await loadPackage(match[1]); $('package-tab').click(); }
+    else fillPackage({...packageSchema.defaults,mode:'new'});
+    show('package-state', packagePending ? '上次操作结果未确认；重复相同按钮将使用原请求 ID。' : packageSchema.available ? '填写参数后保存草稿。' : '发包网关尚未配置；可填写草稿，预检与发布暂不可用。', !packageSchema.available);
+    packageControls();
+  } catch (error) { show('package-state', error.message, true); }
+}
+$('package-prefill').addEventListener('click', async () => {
+  try {
+    const generation = packageGeneration;
+    const value = await request('/api/package/intent', 'POST', {text: $('package-intent').value});
+    if (!authenticated || generation !== packageGeneration) return;
+    Object.entries(value.prefill).forEach(([key,val]) => { if ($('pkg-' + key)) $('pkg-' + key).value = val; });
+    suggestPackageFields();
+    show('package-state', '已填入明显的名称/模式。请补充模块、功能要求和目标。');
+    packageControls();
+  } catch (error) { show('package-state', error.message, true); }
+});
+$('package-save').addEventListener('click', async () => {
+  if (packageBusy) return;
+  packageBusy = true; packageControls();
+  try {
+    const spec = packageFields();
+    const editing = !!packageDraft;
+    const body = editing ? {request_id: crypto.randomUUID(),revision:packageDraft.revision,spec} :
+      {request_id:crypto.randomUUID(),spec};
+    const draft = await packageMutation(editing ? 'update' : 'create',
+      editing ? '/api/package/drafts/' + packageDraft.id : '/api/package/drafts',
+      editing ? 'PUT' : 'POST', body);
+    await packageHistory(); fillPackage(draft.spec); renderPackage(draft);
+    show('package-state', '草稿已保存；参数变更会使先前预检和确认失效。');
+  } catch (error) { show('package-state', '保存结果未确认：' + error.message + '。重试会使用同一请求 ID。', true); }
+  finally { packageBusy = false; packageControls(); }
+});
+$('package-prepare').addEventListener('click', async () => {
+  if (!packageDraft || packageDirty() || packageBusy) return;
+  packageBusy = true; packageControls();
+  try {
+    const requestId = packageDraft.prepare_error === 'GatewayUnknown' ? packageDraft.prepare_request_id : crypto.randomUUID();
+    const body = {request_id:requestId,revision:packageDraft.revision,image_profile:requestId === packageDraft.prepare_request_id ? packageDraft.prepare_image_profile : $('package-image').value};
+    const draft = await packageMutation('prepare','/api/package/drafts/' + packageDraft.id + '/prepare','POST',body);
+    renderPackage(draft); show('package-state', '真实预检已提交；请刷新读取验证后的产物。');
+  } catch (error) { show('package-state', '预检提交结果未确认：' + error.message + '。重试会使用同一请求 ID。', true); }
+  finally { packageBusy = false; packageControls(); }
+});
+$('package-confirm').addEventListener('click', async () => {
+  if (!packageDraft || !packageDraft.preview || packageDirty() || packageBusy) return;
+  packageBusy = true; packageControls();
+  try {
+    const body = {request_id:crypto.randomUUID(),revision:packageDraft.revision,
+      preview_sha256:packageDraft.preview.preview_sha256,confirmation:packageDraft.preview.confirmation};
+    const draft = await packageMutation('confirm','/api/package/drafts/' + packageDraft.id + '/confirm','POST',body);
+    renderPackage(draft); show('package-state', '已提交精确发布任务；完成状态以任务和注册表回读为准。');
+  } catch (error) { show('package-state', '确认结果未确认：' + error.message + '。重试会使用同一请求 ID。', true); }
+  finally { packageBusy = false; packageControls(); }
+});
+$('package-confirm-text').addEventListener('input', packageControls);
+$('package-history').addEventListener('change', () => loadPackage($('package-history').value));
+$('package-refresh').addEventListener('click', async () => {
+  if (packageDraft) await loadPackage(packageDraft.id);
+  else await packageHistory();
+});
+
+$('package-retry-confirm').addEventListener('click', async () => {
+  if (!packageDraft || packageDraft.publish_error !== 'GatewayUnknown' || packageBusy) return;
+  packageBusy = true; packageControls();
+  try {
+    const body = {request_id:packageDraft.confirm_request_id,revision:packageDraft.revision,
+      preview_sha256:packageDraft.preview.preview_sha256,confirmation:packageDraft.preview.confirmation};
+    const draft = await packageMutation('confirm','/api/package/drafts/' + packageDraft.id + '/confirm','POST',body);
+    renderPackage(draft);
+    show('package-state', '已按同一任务 ID 重新核对网关会话。');
+  } catch (error) { show('package-state', '同一任务重试未确认：' + error.message, true); }
+  finally { packageBusy = false; packageControls(); }
+});

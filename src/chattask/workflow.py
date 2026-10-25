@@ -72,7 +72,7 @@ def validate_template(spec: dict) -> dict:
 
 class TaskStore:
     """Same-UID private JSON store. Atomic replace and a process-shared writer lock."""
-    _collections = {'templates', 'template_revisions', 'repositories', 'runs'}
+    _collections = {'templates', 'template_revisions', 'repositories', 'runs', 'package_drafts'}
 
     def __init__(self, root: str | Path):
         self.root = Path(root)
@@ -235,7 +235,7 @@ class WorkflowService:
         return self._public(self._owned(owner, run_id))
 
     def list_runs(self, owner: str) -> list[dict]:
-        return [self._public(r) for r in sorted((r for r in self.store.list('runs') if r['owner'] == owner), key=lambda r: r['created_at'], reverse=True)[:100]]
+        return [self._public(r) for r in sorted((r for r in self.store.list('runs') if r['owner'] == owner and r.get('engine') != 'codex'), key=lambda r: r['created_at'], reverse=True)[:100]]
 
     async def create_run(self, owner: str, body: dict) -> dict:
         if not isinstance(body, dict) or set(body) - {'request_id', 'repository_id', 'template_id', 'version', 'pull_request', 'install_extras'}:
@@ -346,6 +346,8 @@ class WorkflowService:
     async def recover(self) -> None:
         with self.store.locked():
             for run in self.store.list('runs'):
+                if run.get('engine') == 'codex':
+                    continue
                 if run['status'] in {'queued', 'running', 'cancel_requested', 'releasing'}:
                     run['status'] = 'interrupted'
                     run['error'] = 'previous worker stopped; inspect real sandbox and remote release target before retry'

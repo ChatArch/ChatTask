@@ -1,4 +1,7 @@
-# Python 接口
+# Python 接口树
+
+通用任务入口：`chattask.agent_tasks.AgentTaskService`（create/get/list/wait/cancel）、`run_task`；执行器：`chattask.codex_tasks.CodexTaskExecutor`，配置：`CodexRuntime`。任务只提供说明、镜像配置和可选的前次结果 ID，不提供宿主密钥或路径。
+
 
 CLI 和 Web 复用可导入的业务层；导入 `chattask` 本身不连接 Docker、读取令牌、建目录或启动服务。
 
@@ -20,7 +23,7 @@ chattask
 ├── executor.SandboxExecutor       # OpenSandbox 真执行与独立清理核验
 ├── tool_client.ChatPyPITools      # PyPI 命名 profile / ChatAuth TokenStore / REST
 ├── release.ChatGHReleaseAdapter   # 已合并 PR、检查、标签写入/核对
-├── create_app(settings, service=..., workflow=...)
+├── create_app(settings, service=..., workflow=..., agent_tasks=...)
 └── state_paths(home=...)
 ```
 

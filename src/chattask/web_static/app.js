@@ -555,7 +555,7 @@ function packageFields() {
   return spec;
 }
 function packageDirty() {
-  return !!packageDraft && JSON.stringify(packageFields()) !== JSON.stringify(packageDraft.spec);
+  return !!packageDraft && Object.entries(packageFields()).some(([key,value]) => value !== packageDraft.spec[key]);
 }
 function packageControls() {
   const hasDraft = !!packageDraft;

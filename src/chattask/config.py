@@ -15,6 +15,8 @@ class ChatTaskConfig(BaseEnvConfig):
     CHATTASK_WEB_ORIGIN = EnvField('CHATTASK_WEB_ORIGIN', default='http://127.0.0.1:8000', desc='Fixed canonical browser origin.')
     CHATTASK_LOGIN_USERNAME = EnvField('CHATTASK_LOGIN_USERNAME', desc='Explicit fixed site account; no built-in production account.')
     CHATTASK_LOGIN_PASSWORD = EnvField('CHATTASK_LOGIN_PASSWORD', desc='Site password verified through ChatLogin.', is_sensitive=True)
+    CHATTASK_WORKSPACE_KEY = EnvField('CHATTASK_WORKSPACE_KEY', desc='Scoped service key for the workspace integration routes only.', is_sensitive=True)
+    CHATTASK_ANALYSIS_PROFILE = EnvField('CHATTASK_ANALYSIS_PROFILE', desc='Reference to an existing ChatEnv OpenAI profile for provided-material analysis; no model credential is duplicated.')
 
     CHATTASK_CODEX_BASE_URL = EnvField('CHATTASK_CODEX_BASE_URL', desc='Configured model gateway base, with its API prefix.')
     CHATTASK_CODEX_API_KEY = EnvField('CHATTASK_CODEX_API_KEY', desc='Runtime task/model access token; injected into guest processes, never baked into images.', is_sensitive=True)
@@ -31,7 +33,7 @@ class ChatTaskConfig(BaseEnvConfig):
     @classmethod
     def test(cls):
         fields=cls.get_fields()
-        for key in ['CHATTASK_SANDBOX_API_KEY','CHATTASK_LOGIN_PASSWORD','CHATTASK_GATEWAY_CLIENT_TOKEN']:
+        for key in ['CHATTASK_SANDBOX_API_KEY','CHATTASK_LOGIN_PASSWORD','CHATTASK_GATEWAY_CLIENT_TOKEN','CHATTASK_WORKSPACE_KEY']:
             if not fields[key].is_sensitive:
                 raise RuntimeError('ChatTask secret-field contract failed')
         print('ChatTask schema registered; sensitive fields are masked. This check does not execute a workload.')

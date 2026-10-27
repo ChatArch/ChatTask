@@ -22,6 +22,7 @@
       <button id="package-tab" type="button" aria-controls="package-view" aria-selected="false">Python 发包 <span>Package</span></button>
       <button id="templates-tab" type="button" aria-controls="template-view" aria-selected="false">任务模板 <span>Templates</span></button>
       <button id="sandbox-tab" type="button" aria-controls="sandbox-view" aria-selected="false">Sandbox 实验 <span>Experiments</span></button>
+      <button id="workspace-tab" type="button" aria-controls="workspace-view" aria-selected="false">材料分析 <span>Workspace</span></button>
     </nav>
     <section id="agent-view" aria-label="通用任务">
       <div class="template-grid">
@@ -46,6 +47,20 @@
           <button id="agent-refresh" class="secondary-action" type="button">刷新结果</button>
         </section>
       </div>
+    </section>
+    <section id="workspace-view" aria-label="Workspace 材料分析结果" hidden>
+      <section class="panel">
+        <div class="panel-no">WORKSPACE <span>任务 → Run → 报告</span></div>
+        <h2>查看实际执行结果。</h2>
+        <p>仅分析提交时整理的材料，不访问宿主文件或外部工具。报告生成不代表原建议已完成；任务创建与执行确认由受信 Workspace 发起。</p>
+        <label for="workspace-picker">已保存的材料分析任务</label>
+        <select id="workspace-picker"><option value="">选择任务</option></select>
+        <button id="workspace-refresh" class="secondary-action" type="button">刷新任务与结果</button>
+        <div id="workspace-state" class="status" role="status" aria-live="polite"></div>
+        <details><summary>任务来源、要求与资料快照</summary><pre id="workspace-detail" class="output"></pre></details>
+        <div id="workspace-runs" class="artifact-list"></div>
+        <pre id="workspace-report" class="output" aria-label="材料分析报告"></pre>
+      </section>
     </section>
     <section id="package-view" aria-label="Python 发包" hidden>
       <div class="template-grid">

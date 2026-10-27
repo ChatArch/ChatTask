@@ -40,6 +40,7 @@ plugins:
             能力地图: Capability Map
             Python 接口树: Python Interface Tree
             通用任务与镜像: Generic Tasks and Images
+            Workspace 材料分析: Workspace Material Analysis
 markdown_extensions:
   - admonition
   - attr_list
@@ -64,6 +65,7 @@ extra:
 nav:
   - 首页: index.md
   - 通用任务与镜像: tasks.md
+  - Workspace 材料分析: workspace.md
   - 命令与接口:
       - CLI 树: cli-tree.md
       - 能力地图: capability-map.md

@@ -15,6 +15,10 @@ ChatTask 的主模型是 **任务 → Codex + Sandbox → 结果**。任务说�
 
 ## 从源码使用
 
+### Workspace 材料分析
+
+从 0.1.4 起，受信 Workspace 可创建资料快照、单独确认运行，并回读真实模型生成的摘要校验报告。Task 页面「材料分析」显示任务来源与 Run 历史。这是只读材料执行器，不调用工具或读取宿主文件，也不会把报告完成标成原建议完成；配置、认证与 HTTP 合约见[材料分析接入](docs/workspace.md)。
+
 ```bash
 python -m pip install -e '.[web,dev]'
 chattask --tree

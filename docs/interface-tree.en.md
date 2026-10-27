@@ -23,7 +23,8 @@ chattask
 ├── executor.SandboxExecutor       # Real OpenSandbox execution and independent cleanup check
 ├── tool_client.ChatPyPITools      # PyPI named profile / ChatAuth TokenStore / REST
 ├── release.ChatGHReleaseAdapter   # Merged PR, checks, tag write/reconciliation
-├── create_app(settings, service=..., workflow=..., agent_tasks=...)
+├── workspace_analysis.WorkspaceAnalysis  # Independent material drafts/Runs/digest-checked reports
+├── create_app(settings, service=..., workflow=..., agent_tasks=..., analysis=...)
 └── state_paths(home=...)
 ```
 

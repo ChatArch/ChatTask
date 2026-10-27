@@ -15,6 +15,10 @@ The product model is **task → Codex + Sandbox → result**. Instructions and a
 
 ## Run from source
 
+### Workspace material analysis
+
+From 0.1.4, a trusted Workspace can create a fixed material snapshot, separately confirm a Run and retrieve a digest-checked report from the real named model. The material-analysis tab shows source provenance and Run history. This read-only executor has no tools or host-file access, and report completion never marks the original proposal complete. See the [configuration and HTTP contract](docs/workspace.en.md).
+
 ```bash
 python -m pip install -e '.[web,dev]'
 chattask --tree

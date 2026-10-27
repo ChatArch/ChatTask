@@ -2,7 +2,9 @@
 from __future__ import annotations
 import asyncio
 import hmac
+import re
 import time
+from urllib.parse import urlencode
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
@@ -96,7 +98,11 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
                     await auth.current_user(request)
                 except HTTPException as exc:
                     if exc.status_code == 401:
-                        return RedirectResponse('/auth/?next=/', status_code=303)
+                        target = '/'
+                        ids = request.query_params.getlist('workspace_task')
+                        if len(ids) == 1 and re.fullmatch(r'[0-9a-f]{32}', ids[0]):
+                            target += '?workspace_task=' + ids[0]
+                        return RedirectResponse('/auth/?' + urlencode({'next': target}), status_code=303)
                     raise
         except HTTPException as exc:
             return JSONResponse({'detail': exc.detail}, status_code=exc.status_code)

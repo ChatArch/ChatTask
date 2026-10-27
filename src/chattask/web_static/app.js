@@ -137,6 +137,11 @@ controls(false);
     await initializeTemplates();
     await initializeAgentTasks();
     await initializePackages();
+    const workspaceId = new URLSearchParams(location.search).get('workspace_task');
+    if (workspaceId && /^[0-9a-f]{32}$/.test(workspaceId)) {
+      selectTab('workspace');
+      await initializeWorkspace(workspaceId);
+    }
   } catch (e) { show('task-state', '无法确认登录状态，请刷新后重试。', true); } deployTemplateControls();
 })();
 
@@ -150,6 +155,7 @@ let refreshTimer = null;
 const activeStatuses = new Set(['queued', 'running', 'cancel_requested', 'releasing']);
 
 function clearTemplateState() {
+  clearWorkspaceState();
   clearAgentState();
   clearPackageState();
   templates = []; repositories = []; selectedRun = null; pendingCreate = null;
@@ -188,6 +194,8 @@ function selectTab(key) {
   $('sandbox-view').hidden = key !== 'sandbox';
   $('templates-tab').setAttribute('aria-selected', String(key === 'templates'));
   $('sandbox-tab').setAttribute('aria-selected', String(key === 'sandbox'));
+  $('workspace-view').hidden = key !== 'workspace';
+  $('workspace-tab').setAttribute('aria-selected', String(key === 'workspace'));
 }
 $('agent-tab').addEventListener('click', () => selectTab('agent'));
 $('package-tab').addEventListener('click', () => selectTab('package'));
@@ -804,3 +812,81 @@ $('package-recheck').addEventListener('click', async () => {
     show('package-state','只读核验结果未确认：' + error.message + '。重试此按钮会使用同一请求 ID。',true);
   } finally { packageBusy = false; packageControls(); }
 });
+
+// Native Workspace material-analysis results: read-only, never start a Run here.
+let workspaceSequence = 0;
+let workspaceSelected = '';
+let workspaceReportSequence = 0;
+function clearWorkspaceState() {
+  workspaceSequence++; workspaceReportSequence++; workspaceSelected = '';
+  $('workspace-picker').replaceChildren(option('', '选择任务'));
+  $('workspace-detail').textContent = '';
+  $('workspace-runs').replaceChildren();
+  $('workspace-report').textContent = '';
+  $('workspace-state').textContent = '';
+}
+async function initializeWorkspace(preferredId = '') {
+  const sequence = ++workspaceSequence;
+  try {
+    const data = await request('/api/workspace-tasks');
+    if (!authenticated || sequence !== workspaceSequence) return;
+    const picker = $('workspace-picker');
+    picker.replaceChildren(option('', '选择任务'));
+    data.tasks.forEach(task => picker.append(option(task.id, task.title)));
+    if (preferredId && /^[0-9a-f]{32}$/.test(preferredId)) {
+      if (!data.tasks.some(task => task.id === preferredId)) picker.append(option(preferredId, `任务 ${preferredId.slice(0, 8)}`));
+      picker.value = preferredId;
+    }
+    show('workspace-state', data.tasks.length ? '已读取保存的任务。分析完成不等于原建议已完成。' : '尚无材料分析任务。');
+    if (picker.value) await loadWorkspaceTask(picker.value);
+  } catch (error) {
+    if (authenticated && sequence === workspaceSequence) show('workspace-state', `刷新失败，已显示内容可能过期：${error.message}`, true);
+  }
+}
+async function loadWorkspaceTask(id) {
+  if (!/^[0-9a-f]{32}$/.test(id)) return;
+  const sequence = ++workspaceSequence;
+  if (workspaceSelected !== id) {
+    workspaceSelected = id; workspaceReportSequence++;
+    $('workspace-detail').textContent = '';
+    $('workspace-runs').replaceChildren();
+    $('workspace-report').textContent = '';
+  }
+  try {
+    const data = await request(`/api/workspace-tasks/${encodeURIComponent(id)}`);
+    if (!authenticated || sequence !== workspaceSequence || workspaceSelected !== id) return;
+    const task = data.task;
+    if (task.id !== id) throw new Error('任务回执与所选目标不一致');
+    $('workspace-detail').textContent = `${task.title}\nTask ${task.id}\n状态 ${task.status} · 版本 ${task.version}\n来源 ${JSON.stringify(task.source)}\n材料摘要 ${task.source_digest}\n要求 ${task.instructions}\n验收 ${task.acceptance}\n\n${task.context.map(item => `[${item.kind}] ${item.title}\n${item.text}`).join('\n\n')}`;
+    $('workspace-runs').replaceChildren();
+    task.runs.forEach(run => {
+      const row = document.createElement('div');
+      row.textContent = `Run ${run.id} · ${run.status}${run.model ? ' · ' + run.model : ''}${run.error ? ' · ' + run.error : ''} `;
+      if (run.status === 'succeeded' && run.report) {
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'secondary-action'; button.textContent = '查看报告';
+        button.addEventListener('click', () => loadWorkspaceReport(task.id, run.id));
+        row.append(button);
+      }
+      $('workspace-runs').append(row);
+    });
+    show('workspace-state', `已读取 ${task.title}；${task.runs.length} 次运行，失败记录保留。`);
+  } catch (error) {
+    if (authenticated && sequence === workspaceSequence) show('workspace-state', `读取失败，已显示内容可能过期：${error.message}`, true);
+  }
+}
+async function loadWorkspaceReport(taskId, runId) {
+  if (!/^[0-9a-f]{32}$/.test(taskId) || !/^[0-9a-f]{32}$/.test(runId)) return;
+  const sequence = ++workspaceReportSequence;
+  try {
+    const report = await request(`/api/workspace-tasks/${encodeURIComponent(taskId)}/runs/${encodeURIComponent(runId)}/report`);
+    if (!authenticated || workspaceSelected !== taskId || sequence !== workspaceReportSequence) return;
+    $('workspace-report').textContent = report.text;
+    show('workspace-state', `报告 Run ${runId} · SHA256 ${report.sha256} · 仅已提供材料，不代表原建议完成。`);
+  } catch (error) {
+    if (authenticated && workspaceSelected === taskId && sequence === workspaceReportSequence) show('workspace-state', `报告读取失败，保留上次结果：${error.message}`, true);
+  }
+}
+$('workspace-tab').addEventListener('click', async () => { selectTab('workspace'); await initializeWorkspace($('workspace-picker').value); });
+$('workspace-picker').addEventListener('change', () => { if ($('workspace-picker').value) loadWorkspaceTask($('workspace-picker').value); else clearWorkspaceState(); });
+$('workspace-refresh').addEventListener('click', () => initializeWorkspace($('workspace-picker').value));

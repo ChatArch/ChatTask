@@ -157,6 +157,10 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await client.get(report_path, params={'actor': 'subject-a'}, headers=headers)).status_code, 200)
             self.assertEqual((await client.post(path + '/' + task['id'] + '/runs', json=confirmation, headers=headers)).status_code, 200)
             self.assertEqual((await client.get('/api/workspace-tasks')).status_code, 401)
+            redirect = await client.get('/?workspace_task=' + task['id'])
+            self.assertEqual(redirect.status_code, 303)
+            from urllib.parse import urlsplit, parse_qs
+            self.assertEqual(parse_qs(urlsplit(redirect.headers['location']).query)['next'], ['/?workspace_task=' + task['id']])
             client.cookies.set('fixture-session', 'operator')
             native = await client.get('/api/workspace-tasks/' + task['id'])
             self.assertEqual(native.status_code, 200, native.text)

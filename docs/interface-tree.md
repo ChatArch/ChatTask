@@ -23,7 +23,8 @@ chattask
 ├── executor.SandboxExecutor       # OpenSandbox 真执行与独立清理核验
 ├── tool_client.ChatPyPITools      # PyPI 命名 profile / ChatAuth TokenStore / REST
 ├── release.ChatGHReleaseAdapter   # 已合并 PR、检查、标签写入/核对
-├── create_app(settings, service=..., workflow=..., agent_tasks=...)
+├── workspace_analysis.WorkspaceAnalysis  # 材料草稿/确认/Run/摘要报告，独立只读执行器
+├── create_app(settings, service=..., workflow=..., agent_tasks=..., analysis=...)
 └── state_paths(home=...)
 ```
 

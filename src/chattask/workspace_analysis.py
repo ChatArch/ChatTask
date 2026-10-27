@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import json
+import os
 import re
+import stat
 import uuid
+import weakref
 from typing import TypedDict
 from urllib.parse import urlsplit
 
@@ -333,6 +337,28 @@ class WorkspaceAnalysis:
         self.driver = driver if driver is not None else OpenAIChatDriver(profile, home=home)
         self._slot = asyncio.Semaphore(1)
         self._jobs: dict[str, asyncio.Task] = {}
+        self._owner_release = None
+
+    def _claim_owner(self):
+        """Fail closed before execution/recovery when another controller owns state."""
+        if self._owner_release is not None:
+            return
+        fd = None
+        try:
+            fd = os.open(self.store.root / '.analysis-owner.lock',
+                         os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+                raise OSError('unsafe analysis owner file')
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            if fd is not None:
+                os.close(fd)
+            raise AnalysisUnavailable('analysis store is already owned or unavailable') from None
+        # Keep the inode stable. Closing the descriptor releases ownership even
+        # after process exit; never unlink a lock that a contender may have open.
+        self._owner_release = weakref.finalize(self, os.close, fd)
 
     def model_configured(self):
         return self.driver.configured() if hasattr(self.driver, 'configured') else True
@@ -428,6 +454,7 @@ class WorkspaceAnalysis:
         task = self._owned_task(clean['actor'], task_id)
         if task['version'] != clean['task_version'] or task['source_digest'] != clean['source_digest']:
             raise AnalysisConflict('task version or digest changed')
+        self._claim_owner()
         fingerprint = hashlib.sha256(_bytes(clean)).hexdigest()
         with self.store.locked():
             runs = [r for r in self.store.list('analysis_runs') if r['task_id'] == task_id]
@@ -508,6 +535,7 @@ class WorkspaceAnalysis:
     async def cancel(self, actor, task_id, run_id):
         with self.store.locked():
             run = self._owned_run(actor, task_id, run_id)
+            self._claim_owner()
             if run['status'] not in _TERMINAL:
                 run['status'] = 'cancelled'; run['error'] = None; run['updated_at'] = now()
                 self.store.put('analysis_runs', run_id, run)
@@ -527,6 +555,7 @@ class WorkspaceAnalysis:
         return {'text': data.decode('utf-8'), 'sha256': meta['sha256'], 'size': meta['size']}
 
     async def recover(self):
+        self._claim_owner()
         with self.store.locked():
             for run in self.store.list('analysis_runs'):
                 if run['status'] in ('queued', 'running'):
@@ -534,10 +563,15 @@ class WorkspaceAnalysis:
                     run['updated_at'] = now(); self.store.put('analysis_runs', run['id'], run)
 
     async def shutdown(self):
-        for job in list(self._jobs.values()):
-            job.cancel()
-        if self._jobs:
-            await asyncio.gather(*list(self._jobs.values()), return_exceptions=True)
+        try:
+            for job in list(self._jobs.values()):
+                job.cancel()
+            if self._jobs:
+                await asyncio.gather(*list(self._jobs.values()), return_exceptions=True)
+        finally:
+            if self._owner_release is not None:
+                self._owner_release()
+                self._owner_release = None
 
     async def wait(self, run_id):
         job = self._jobs.get(run_id)

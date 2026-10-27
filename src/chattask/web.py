@@ -52,15 +52,17 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
     analysis = analysis if analysis is not None else WorkspaceAnalysis(workflow.store, profile=settings.analysis_profile, home=settings.home)
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        await workflow.recover()
         await analysis.recover()
-        if callable(getattr(agent_tasks,'recover',None)):
-            await agent_tasks.recover()
-        sweep = asyncio.create_task(service.sweep())
+        sweep = None
         try:
+            await workflow.recover()
+            if callable(getattr(agent_tasks,'recover',None)):
+                await agent_tasks.recover()
+            sweep = asyncio.create_task(service.sweep())
             yield
         finally:
-            sweep.cancel()
+            if sweep is not None:
+                sweep.cancel()
             await analysis.shutdown()
             await agent_tasks.shutdown()
             await workflow.shutdown()

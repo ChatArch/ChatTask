@@ -32,6 +32,8 @@ Starting a Run requires the same actor, a separately stable request ID, `task_ve
 
 ## Result evidence
 
+Only one active material-analysis controller may own a state directory. Startup recovery or the first execution acquires a process-shared exclusive lock; another controller refuses execution, cancellation and recovery rather than interrupting live Runs. `shutdown()` waits for owned jobs before releasing the lock, and process exit releases it too. Python callers should call `shutdown()` in `finally`. Reading saved reports does not require execution ownership.
+
 `report.md` binds Task, proposal, revisions, material digest and actual model. Reading independently rechecks size and SHA256; only a semantically complete model response succeeds. A completed report proves analysis of the supplied material, **not completion of the original proposal, deployment or release**.
 
 The existing site account can open `/?workspace_task=<32-character Task ID>` and return to that task after login to read its Runs and reports. `/api/workspace-tasks` and its detail/report routes retain ChatLogin authentication; a service key is not a browser session. The browser only reads existing tasks. Transient failures retain the previous report with a stale/error message; authentication loss clears protected views. The single-user operator view is not a multi-tenant authorization system.

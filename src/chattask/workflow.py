@@ -72,7 +72,7 @@ def validate_template(spec: dict) -> dict:
 
 class TaskStore:
     """Same-UID private JSON store. Atomic replace and a process-shared writer lock."""
-    _collections = {'templates', 'template_revisions', 'repositories', 'runs', 'package_drafts'}
+    _collections = {'templates', 'template_revisions', 'repositories', 'runs', 'package_drafts', 'analysis_tasks', 'analysis_runs'}
 
     def __init__(self, root: str | Path):
         self.root = Path(root)

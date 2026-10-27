@@ -1,6 +1,7 @@
 """Optional browser/API adapter; domain execution remains in TaskService."""
 from __future__ import annotations
 import asyncio
+import hmac
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,6 +17,7 @@ from .workflow import TaskStore, WorkflowService
 from .executor import SandboxExecutor
 from .tool_client import ChatPyPITools
 from .release import ChatGHReleaseAdapter
+from .workspace_analysis import WorkspaceAnalysis, AnalysisConflict, AnalysisUnavailable
 
 ROOT=Path(__file__).resolve().parent
 
@@ -26,10 +28,11 @@ class CommandInput(BaseModel):
     command: str = Field(min_length=1,max_length=256)
 
 def create_app(settings: TaskSettings | None=None, *, service: TaskService | None=None,
-               workflow: WorkflowService | None=None, agent_tasks=None) -> FastAPI:
+               workflow: WorkflowService | None=None, agent_tasks=None,
+               analysis: WorkspaceAnalysis | None=None, auth_adapter=None) -> FastAPI:
     """Construct explicitly; importing this module does not connect/start anything."""
     settings = settings if settings is not None else load_settings()
-    auth = create_auth(settings)
+    auth = auth_adapter if auth_adapter is not None else create_auth(settings)
     service = service if service is not None else TaskService(settings)
     workflow = workflow if workflow is not None else WorkflowService(
         TaskStore(state_paths(home=settings.home)['state_dir']),
@@ -44,9 +47,11 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
     if public_dependencies is None:
         public_dependencies=load_guest_dependencies(settings)
     packages = PackageService(workflow.store, agent_tasks, broker_required=True,public_dependencies=public_dependencies)
+    analysis = analysis if analysis is not None else WorkspaceAnalysis(workflow.store, profile=settings.analysis_profile, home=settings.home)
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await workflow.recover()
+        await analysis.recover()
         if callable(getattr(agent_tasks,'recover',None)):
             await agent_tasks.recover()
         sweep = asyncio.create_task(service.sweep())
@@ -54,6 +59,7 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
             yield
         finally:
             sweep.cancel()
+            await analysis.shutdown()
             await agent_tasks.shutdown()
             await workflow.shutdown()
             try:
@@ -69,9 +75,18 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
     async def site_guard(request: Request, call_next):
         if request.url.path == '/health' and request.method == 'GET':
             return JSONResponse({'status': 'ready', 'package': 'ChatTask', 'version': __version__, 'backend': 'OpenSandbox'})
+        integration = request.url.path.startswith('/integrations/workspace/')
         try:
             auth._check_host(request)
-            if request.url.path.startswith('/api/'):
+            if integration:
+                token = request.headers.get('authorization', '')
+                expected = 'Bearer ' + settings.workspace_key
+                if not settings.workspace_key or not hmac.compare_digest(token.encode('utf-8'), expected.encode('utf-8')):
+                    raise HTTPException(401, detail='workspace service authentication required')
+                origin = request.headers.get('origin')
+                if origin and origin != settings.origin:
+                    raise HTTPException(403, detail='untrusted origin')
+            elif request.url.path.startswith('/api/'):
                 if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
                     await auth.csrf_user(request)
                 else:
@@ -89,7 +104,7 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
             length = int(request.headers.get('content-length', '0'))
         except ValueError:
             return JSONResponse({'error': 'invalid content length'}, status_code=400)
-        limit = 65536 if request.url.path == '/api/agent/tasks' or request.url.path.startswith('/api/package/') else 4096
+        limit = 65536 if integration or request.url.path == '/api/agent/tasks' or request.url.path.startswith('/api/package/') else 4096
         if length > limit or length < 0:
             return JSONResponse({'error': 'request too large'}, status_code=413)
         if request.method in ('POST','PUT','PATCH'):
@@ -120,6 +135,86 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
     @app.get('/health')
     async def health():
         return {'status': 'ready', 'package': 'ChatTask', 'version': __version__, 'backend': 'OpenSandbox'}
+
+    def workspace_error(exc):
+        if isinstance(exc, KeyError):
+            raise HTTPException(404, detail='workspace task or report not found') from None
+        if isinstance(exc, AnalysisConflict):
+            raise HTTPException(409, detail=str(exc)) from None
+        if isinstance(exc, AnalysisUnavailable):
+            raise HTTPException(503, detail=str(exc)) from None
+        if isinstance(exc, ValueError):
+            raise HTTPException(422, detail=str(exc)) from None
+        raise HTTPException(503, detail='workspace analysis unavailable') from None
+
+    @app.get('/integrations/workspace/capabilities')
+    async def workspace_capabilities():
+        return {'enabled': True, 'kind': 'workspace-review', 'scope': 'provided_materials_only',
+                'model_configured': analysis.model_configured()}
+
+    @app.post('/integrations/workspace/tasks')
+    async def workspace_create_task(body: dict):
+        try:
+            task, created = analysis.create_task(body)
+            return JSONResponse({'task': task}, status_code=201 if created else 200)
+        except Exception as exc:
+            workspace_error(exc)
+
+    @app.get('/integrations/workspace/tasks')
+    async def workspace_tasks(actor: str, proposal_id: str):
+        try:
+            return {'tasks': analysis.list_tasks(actor, proposal_id)}
+        except Exception as exc:
+            workspace_error(exc)
+
+    @app.get('/integrations/workspace/tasks/{task_id}')
+    async def workspace_task(task_id: str, actor: str):
+        try:
+            return {'task': analysis.get_task(actor, task_id)}
+        except Exception as exc:
+            workspace_error(exc)
+
+    @app.post('/integrations/workspace/tasks/{task_id}/runs')
+    async def workspace_create_run(task_id: str, body: dict):
+        try:
+            run, created = await analysis.create_run(task_id, body)
+            return JSONResponse({'run': run}, status_code=201 if created else 200)
+        except Exception as exc:
+            workspace_error(exc)
+
+    @app.post('/integrations/workspace/tasks/{task_id}/runs/{run_id}/cancel')
+    async def workspace_cancel(task_id: str, run_id: str, body: dict):
+        try:
+            if not isinstance(body, dict) or set(body) != {'actor'}:
+                raise ValueError('invalid cancel input')
+            return {'run': await analysis.cancel(body['actor'], task_id, run_id)}
+        except Exception as exc:
+            workspace_error(exc)
+
+    @app.get('/integrations/workspace/tasks/{task_id}/runs/{run_id}/report')
+    async def workspace_report(task_id: str, run_id: str, actor: str):
+        try:
+            return analysis.report(actor, task_id, run_id)
+        except Exception as exc:
+            workspace_error(exc)
+
+    @app.get('/api/workspace-tasks')
+    async def native_workspace_tasks():
+        return {'tasks': analysis.native_list()}
+
+    @app.get('/api/workspace-tasks/{task_id}')
+    async def native_workspace_task(task_id: str):
+        try:
+            return {'task': analysis.native_task(task_id)}
+        except Exception as exc:
+            workspace_error(exc)
+
+    @app.get('/api/workspace-tasks/{task_id}/runs/{run_id}/report')
+    async def native_workspace_report(task_id: str, run_id: str):
+        try:
+            return analysis.native_report(task_id, run_id)
+        except Exception as exc:
+            workspace_error(exc)
 
     @app.post('/api/tasks')
     async def task(body: TaskInput):

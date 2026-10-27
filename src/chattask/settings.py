@@ -46,6 +46,8 @@ class TaskSettings:
     gateway_client_token: str=field(default='',repr=False)
     gateway_ca_file: str=''
     codex_hosts: str='{}'
+    workspace_key: str=field(default='',repr=False)
+    analysis_profile: str=''
 
     def __post_init__(self):
         object.__setattr__(self,'endpoint',_origin(self.endpoint))
@@ -54,6 +56,10 @@ class TaskSettings:
             raise ValueError('OpenSandbox API key is required')
         if not isinstance(self.image,str) or not self.image or len(self.image)>256:
             raise ValueError('Invalid workload image')
+        if not isinstance(self.workspace_key,str) or self.workspace_key and not 32 <= len(self.workspace_key.encode('utf-8')) <= 512:
+            raise ValueError('Workspace integration key must be empty or at least 32 bytes')
+        if not isinstance(self.analysis_profile,str) or self.analysis_profile and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}',self.analysis_profile):
+            raise ValueError('Analysis requires an explicit existing profile name')
         if bool(self.gateway_url) != bool(self.gateway_client_token):
             raise ValueError('gateway URL and client token must be configured together')
         if self.gateway_url:
@@ -127,4 +133,6 @@ def load_settings(*,profile: str | None=None,home: str | Path | None=None,overri
                         gateway_url=resolved.get('CHATTASK_GATEWAY_URL') or '',
                         gateway_client_token=resolved.get('CHATTASK_GATEWAY_CLIENT_TOKEN') or '',
                         gateway_ca_file=resolved.get('CHATTASK_GATEWAY_CA_FILE') or '',
-                        codex_hosts=resolved.get('CHATTASK_CODEX_HOSTS') or '{}')
+                        codex_hosts=resolved.get('CHATTASK_CODEX_HOSTS') or '{}',
+                        workspace_key=resolved.get('CHATTASK_WORKSPACE_KEY') or '',
+                        analysis_profile=resolved.get('CHATTASK_ANALYSIS_PROFILE') or '')

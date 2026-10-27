@@ -116,3 +116,36 @@ def test_owner_symlink_is_refused_without_touching_target(tmp_path):
         finally:
             await controller.shutdown()
     asyncio.run(scenario())
+
+
+def test_failed_app_recovery_releases_owner_before_retry(tmp_path):
+    import json
+    from chattask import TaskSettings, create_app
+    from chattask.workflow import WorkflowService
+
+    async def scenario():
+        store = TaskStore(tmp_path / 'state')
+        damaged = store.root / 'analysis_runs' / ('1' * 32 + '.json')
+        damaged.write_text('{broken')
+        controller = WorkspaceAnalysis(store, driver=HeldDriver())
+        class Service:
+            session = None
+            async def shutdown(self):
+                pass
+        settings = TaskSettings('http://127.0.0.1:12345', 'fixture-only',
+                                origin='http://testserver', username='operator',
+                                password='fixture-only-password', home=tmp_path / 'home')
+        app = create_app(settings, service=Service(), workflow=WorkflowService(store),
+                         analysis=controller)
+        replacement = WorkspaceAnalysis(TaskStore(store.root), driver=HeldDriver())
+        try:
+            with pytest.raises(json.JSONDecodeError):
+                async with app.router.lifespan_context(app):
+                    raise AssertionError('damaged recovery must not start the app')
+            damaged.write_text(json.dumps({'status': 'succeeded'}))
+            # Keep the failed app and its controller alive: GC is not cleanup.
+            await replacement.recover()
+        finally:
+            await replacement.shutdown()
+            await controller.shutdown()
+    asyncio.run(scenario())

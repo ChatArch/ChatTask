@@ -230,11 +230,14 @@ class _CompletionStream:
 
 class OpenAIChatDriver:
     """One bounded streamed request from an explicit existing ChatEnv profile."""
-    def __init__(self, profile: str, *, profile_loader=None, transport=None, home=None):
+    def __init__(self, profile: str, *, profile_loader=None, transport=None, home=None, timeout=180.0):
+        if type(timeout) not in (int, float) or not 0.01 <= timeout <= 300:
+            raise ValueError('Analysis transfer budget must be 0.01–300 seconds')
         self.profile = profile
         self.profile_loader = profile_loader
         self.transport = transport
         self.home = home
+        self.timeout = float(timeout)
 
     def _connection(self):
         if not isinstance(self.profile, str) or not _REQUEST.fullmatch(self.profile):
@@ -277,7 +280,7 @@ class OpenAIChatDriver:
                 raise AnalysisUnavailable('model request too large')
             async def bounded_response():
                 async with httpx.AsyncClient(transport=self.transport, follow_redirects=False, trust_env=False,
-                                             timeout=httpx.Timeout(45.0, connect=5.0)) as client:
+                                             timeout=httpx.Timeout(min(45.0, self.timeout), connect=min(5.0, self.timeout))) as client:
                     async with client.stream('POST', url, content=request_bytes,
                                              headers={'Authorization': 'Bearer ' + key,
                                                       'Content-Type': 'application/json'}) as response:
@@ -285,7 +288,7 @@ class OpenAIChatDriver:
                             raise AnalysisUnavailable('model redirect refused')
                         if response.status_code != 200:
                             raise AnalysisUnavailable('model HTTP ' + str(response.status_code))
-                        streamed = response.headers.get('content-type', '').lower().split(';', 1)[0] == 'text/event-stream'
+                        streamed = response.headers.get('content-type', '').lower().split(';', 1)[0].strip() == 'text/event-stream'
                         limit = 1048576 if streamed else 98304
                         declared = response.headers.get('content-length')
                         if declared is not None and (not declared.isdecimal() or int(declared) > limit):
@@ -304,7 +307,7 @@ class OpenAIChatDriver:
                         if streamed:
                             raise AnalysisUnavailable('model stream ended before completion')
                         return json.loads(chunks)
-            data = await asyncio.wait_for(bounded_response(), timeout=60)
+            data = await asyncio.wait_for(bounded_response(), timeout=self.timeout)
             choices = data['choices']
             if not isinstance(choices, list) or len(choices) != 1:
                 raise ValueError('choices')

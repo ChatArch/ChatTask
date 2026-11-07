@@ -19,6 +19,7 @@
 
     <nav class="primary-nav" aria-label="主要功能">
       <button id="agent-tab" type="button" aria-controls="agent-view" aria-selected="true">任务 <span>Codex + Sandbox</span></button>
+      <button id="durable-tab" type="button" aria-controls="durable-view" aria-selected="false">长期任务 <span>Task + Runs</span></button>
       <button id="package-tab" type="button" aria-controls="package-view" aria-selected="false">Python 发包 <span>Package</span></button>
       <button id="templates-tab" type="button" aria-controls="template-view" aria-selected="false">任务模板 <span>Templates</span></button>
       <button id="sandbox-tab" type="button" aria-controls="sandbox-view" aria-selected="false">Sandbox 实验 <span>Experiments</span></button>
@@ -98,6 +99,52 @@
           <p id="package-recheck-note" class="meta-note" hidden>只读取已发布结果；不会再次发布、创建 PR 或标签。原执行记录和错误保留。</p>
           <button id="package-retry-confirm" class="secondary-action" type="button" hidden>重试同一网关会话</button>
           <button id="package-refresh" class="secondary-action" type="button">刷新状态</button>
+        </section>
+      </div>
+    </section>
+    <section id="durable-view" aria-label="长期任务" hidden>
+      <div class="template-grid">
+        <section class="panel">
+          <div class="panel-no">01 <span>长期 Task</span></div>
+          <h2>设定目标，逐轮接续。</h2>
+          <p>这里创建稳定 Task。每轮 Run 在独立 Sandbox 执行；新一轮从已验证的工作区和原生 Codex 会话继续。一次性执行请使用“任务”页。</p>
+          <label for="durable-goal">目标</label><textarea id="durable-goal" rows="5" maxlength="16000" placeholder="描述要完成的长期目标"></textarea>
+          <label for="durable-workflow">工作流</label><select id="durable-workflow"><option value="development">开发（默认）</option><option value="research">研究 → 原 Overleaf 工程</option></select>
+          <div id="durable-sources-box" hidden>
+            <label for="durable-auto-source"><input id="durable-auto-source" type="checkbox"> 自动检索 arXiv 摘要（最多 3 条）</label>
+            <div id="durable-auto-box" hidden>
+              <label for="durable-query">检索关键词</label><input id="durable-query" maxlength="120" placeholder="例如 research agents recovery" autocomplete="off">
+              <p class="meta-note">从 arXiv 官方 Atom API 获取摘要并保存来源快照；不代表读过全文，检索结果需人工核查相关性。</p>
+            </div>
+            <div id="durable-manual-box">
+              <label for="durable-sources">已核对来源记录（JSON 数组）</label>
+              <textarea id="durable-sources" rows="6" placeholder='[{"id":"paper-1","url":"https://example.org/paper","title":"论文标题","excerpt":"已读取的摘要摘录","read_boundary":"摘要"}]'></textarea>
+              <p class="meta-note">此模板使用你提供并核对的来源记录与摘录，不声称自主发现来源。主题写在上方目标中。</p>
+            </div>
+          </div>
+          <label for="durable-image">运行镜像</label><select id="durable-image"></select>
+          <button id="durable-create" class="primary-action" type="button">创建并排队</button>
+          <div id="durable-create-state" class="status" role="status" aria-live="polite"></div>
+          <div id="durable-worker-state" class="meta-note"></div>
+          <label for="durable-history">我的任务</label><select id="durable-history"><option value="">选择任务</option></select>
+          <button id="durable-refresh" class="secondary-action" type="button">刷新状态</button>
+        </section>
+        <section class="panel dark run-panel">
+          <div class="panel-no">02 <span>检查点与每轮历史</span></div>
+          <h2>阶段结果和接续。</h2>
+          <div id="durable-state" class="status" role="status" aria-live="polite">选择长期任务查看。</div>
+          <div id="durable-checkpoint" class="meta-note"></div>
+          <div id="durable-project" class="artifact-list"></div>
+          <ol id="durable-runs" class="run-steps"></ol>
+          <label for="durable-followup">追加要求</label><textarea id="durable-followup" rows="4" maxlength="16000" placeholder="下一轮需要完成什么"></textarea>
+          <label for="durable-ack"><input id="durable-ack" type="checkbox"> 我已检查中断轮次及可能的外部副作用，授权新一轮接续</label>
+          <div class="package-actions">
+            <button id="durable-resume" class="primary-action" type="button">排队新一轮</button>
+            <button id="durable-pause" class="secondary-action" type="button">轮次结束后暂停</button>
+            <button id="durable-complete" class="secondary-action" type="button">标记任务完成</button>
+            <button id="durable-reconcile" class="secondary-action" type="button" hidden>核对后重试同一研究发布操作</button>
+          </div>
+          <p class="meta-note">暂停是协作式阶段边界操作：排队轮次立即暂停，运行中的轮次继续到本轮结束。中断后不会自动重放外部操作。</p>
         </section>
       </div>
     </section>

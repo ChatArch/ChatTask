@@ -98,6 +98,139 @@ def run_command(instructions,instructions_file,image_profile,request_id,input_ta
     if result['status']!='completed':raise click.exceptions.Exit(1)
 
 
+def _durable_service(env_profile):
+    from .settings import load_settings
+    from .durable import configured_service
+    return configured_service(load_settings(profile=env_profile))
+
+
+def _durable_call(operation, env_profile, owner, *args):
+    import json
+    from .durable import DurableConflict
+    try:
+        result = getattr(_durable_service(env_profile), operation)(owner, *args)
+    except (KeyError, ValueError, OSError, DurableConflict) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(result, ensure_ascii=False))
+
+
+@main.group(name='task')
+def task_group():
+    """Control private long-term Tasks; rounds execute in a separate worker."""
+
+
+@task_group.command(name='create')
+@click.argument('instructions')
+@click.option('--image-profile', required=True)
+@click.option('--workflow', type=click.Choice(['development','research']), default='development', show_default=True)
+@click.option('--sources-file', type=click.Path(exists=True, dir_okay=False, path_type=str), help='JSON array of caller-verified research source records.')
+@click.option('--request-id', required=True)
+@click.option('--owner', required=True, help='Trusted local principal identity.')
+@click.option('-e', '--env-profile', default=None)
+def durable_create(instructions, image_profile, workflow, sources_file, request_id, owner, env_profile):
+    """Queue the first round of a long-term Task."""
+    import json
+    from pathlib import Path
+    body={'instructions': instructions, 'image_profile': image_profile, 'request_id': request_id, 'workflow': workflow}
+    if sources_file:
+        try:body['source_records']=json.loads(Path(sources_file).read_text(encoding='utf-8'))
+        except (OSError,ValueError) as exc:raise click.ClickException('invalid research sources JSON file') from exc
+    _durable_call('create', env_profile, owner, body)
+
+
+@task_group.command(name='list')
+@click.option('--owner', required=True)
+@click.option('-e', '--env-profile', default=None)
+def durable_list(owner, env_profile):
+    """List Tasks visible to a trusted local principal."""
+    _durable_call('list', env_profile, owner)
+
+
+@task_group.command(name='show')
+@click.argument('task_id')
+@click.option('--owner', required=True)
+@click.option('-e', '--env-profile', default=None)
+def durable_show(task_id, owner, env_profile):
+    """Show a Task and its immutable round history."""
+    import json
+    try:
+        service = _durable_service(env_profile)
+        click.echo(json.dumps({'task': service.get(owner, task_id), 'runs': service.runs(owner, task_id)}, ensure_ascii=False))
+    except (KeyError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@task_group.command(name='resume')
+@click.argument('task_id')
+@click.argument('instructions')
+@click.option('--request-id', required=True)
+@click.option('--acknowledge-unknown', is_flag=True, help='Confirm inspection of interrupted round and external side effects.')
+@click.option('--sources-file', type=click.Path(exists=True, dir_okay=False, path_type=str), help='Optional new caller-verified research source records.')
+@click.option('--owner', required=True)
+@click.option('-e', '--env-profile', default=None)
+def durable_resume(task_id, instructions, request_id, acknowledge_unknown, sources_file, owner, env_profile):
+    """Queue an explicit new native Codex round from a verified checkpoint."""
+    import json
+    from pathlib import Path
+    body={'request_id': request_id, 'instructions': instructions, 'acknowledge_unknown': acknowledge_unknown}
+    if sources_file:
+        try:body['source_records']=json.loads(Path(sources_file).read_text(encoding='utf-8'))
+        except (OSError,ValueError) as exc:raise click.ClickException('invalid research sources JSON file') from exc
+    _durable_call('resume', env_profile, owner, task_id, body)
+
+
+@task_group.command(name='pause')
+@click.argument('task_id')
+@click.option('--request-id', required=True)
+@click.option('--owner', required=True)
+@click.option('-e', '--env-profile', default=None)
+def durable_pause(task_id, request_id, owner, env_profile):
+    """Pause queued work now or request a cooperative end-of-round pause."""
+    _durable_call('pause', env_profile, owner, task_id, {'request_id': request_id})
+
+
+@task_group.command(name='complete')
+@click.argument('task_id')
+@click.option('--request-id', required=True)
+@click.option('--owner', required=True)
+@click.option('-e', '--env-profile', default=None)
+def durable_complete(task_id, request_id, owner, env_profile):
+    """Mark an inactive long-term Task complete; history remains available."""
+    _durable_call('complete', env_profile, owner, task_id, {'request_id': request_id})
+
+
+@task_group.command(name='reconcile-research')
+@click.argument('task_id')
+@click.option('--request-id', required=True)
+@click.option('--acknowledge-unknown', is_flag=True,
+              help='Confirm inspection of the original project before retrying the same operation identity.')
+@click.option('--owner', required=True)
+@click.option('-e', '--env-profile', default=None)
+def durable_reconcile_research(task_id, request_id, acknowledge_unknown, owner, env_profile):
+    """Queue explicit same-round Research readback/reconciliation."""
+    _durable_call('reconcile_research', env_profile, owner, task_id,
+                  {'request_id': request_id, 'acknowledge_unknown': acknowledge_unknown})
+
+
+@main.command(name='worker')
+@click.option('--once', is_flag=True, help='Claim at most one queued round, then exit.')
+@click.option('--operator', required=True, help='Trusted local operator starting this single writer.')
+@click.option('-e', '--env-profile', required=True, help='Named ChatEnv runtime configuration.')
+def durable_worker(once, operator, env_profile):
+    """Run the independent durable queue executor under a process-held lock."""
+    import asyncio, json
+    from .settings import load_settings
+    from .durable import run_worker
+    if not operator.strip():
+        raise click.UsageError('nonempty --operator required')
+    try:
+        result = asyncio.run(run_worker(load_settings(profile=env_profile), once=once))
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if once:
+        click.echo(json.dumps(result, ensure_ascii=False))
+
+
 
 @main.group(name='package')
 def package_group():

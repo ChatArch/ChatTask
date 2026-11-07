@@ -24,7 +24,11 @@ chattask
 ├── tool_client.ChatPyPITools      # PyPI named profile / ChatAuth TokenStore / REST
 ├── release.ChatGHReleaseAdapter   # Merged PR, checks, tag write/reconciliation
 ├── workspace_analysis.WorkspaceAnalysis  # Independent material drafts/Runs/digest-checked reports
-├── create_app(settings, service=..., workflow=..., agent_tasks=..., analysis=...)
+├── durable.DurableTaskService  # create/list/get/runs/resume/pause/complete/grant/artifact/worker_once
+├── durable.executor_lock / run_worker  # Process-held single writer and separate queue executor
+├── durable_archive.validate_checkpoint  # Private archive structure, limits and live-token scan
+├── durable_research.source_records / research_files  # Bounded supplied sources and round output adapter
+├── create_app(settings, service=..., workflow=..., agent_tasks=..., analysis=..., durable_tasks=...)
 └── state_paths(home=...)
 ```
 

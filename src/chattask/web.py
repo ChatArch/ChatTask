@@ -31,7 +31,7 @@ class CommandInput(BaseModel):
 
 def create_app(settings: TaskSettings | None=None, *, service: TaskService | None=None,
                workflow: WorkflowService | None=None, agent_tasks=None,
-               analysis: WorkspaceAnalysis | None=None, auth_adapter=None) -> FastAPI:
+               analysis: WorkspaceAnalysis | None=None, auth_adapter=None, durable_tasks=None) -> FastAPI:
     """Construct explicitly; importing this module does not connect/start anything."""
     settings = settings if settings is not None else load_settings()
     auth = auth_adapter if auth_adapter is not None else create_auth(settings)
@@ -43,6 +43,10 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
     from .agent_tasks import AgentTaskService
     from .codex_tasks import configured_executor
     agent_tasks = agent_tasks if agent_tasks is not None else AgentTaskService(workflow.store, configured_executor(settings, service))
+    from .durable import DurableTaskService, DurableConflict
+    durable_tasks = durable_tasks if durable_tasks is not None else DurableTaskService(
+        workflow.store, agent_tasks.executor, research_enabled=bool(settings.research_container and settings.research_origin),
+        research_origin=settings.research_origin)
     from .package_service import PackageService
     from .package_template import form_schema, intent_prefill
     public_dependencies=getattr(getattr(workflow,'executor',None),'dependency_archive',None)
@@ -112,7 +116,7 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
             length = int(request.headers.get('content-length', '0'))
         except ValueError:
             return JSONResponse({'error': 'invalid content length'}, status_code=400)
-        limit = 65536 if integration or request.url.path == '/api/agent/tasks' or request.url.path.startswith('/api/package/') else 4096
+        limit = 65536 if integration or request.url.path == '/api/agent/tasks' or request.url.path.startswith('/api/package/') or request.url.path.startswith('/api/durable/') else 4096
         if length > limit or length < 0:
             return JSONResponse({'error': 'request too large'}, status_code=413)
         if request.method in ('POST','PUT','PATCH'):
@@ -271,6 +275,101 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
     async def owner(request: Request) -> str:
         principal = await auth.current_user(request)
         return principal.user_id
+
+    def durable_error(exc):
+        if isinstance(exc, DurableConflict):
+            raise HTTPException(409, detail=str(exc))
+        if isinstance(exc, KeyError):
+            raise HTTPException(404, detail='task not found')
+        if isinstance(exc, ValueError):
+            raise HTTPException(422, detail=str(exc))
+        raise exc
+
+    @app.post('/api/durable/research/auto')
+    async def durable_auto_research(request: Request, body: dict):
+        principal = await owner(request)
+        if not isinstance(body, dict) or set(body) - {'request_id', 'instructions', 'image_profile', 'query', 'max_results'}:
+            raise HTTPException(422, detail='invalid auto research fields')
+        if not durable_tasks.research_enabled:
+            raise HTTPException(422, detail='research workflow is not configured')
+        try:
+            return await durable_tasks.create_auto_research(principal, body)
+        except (DurableConflict, ValueError, KeyError) as exc:
+            durable_error(exc)
+
+    @app.post('/api/durable/tasks')
+    async def durable_create(request: Request, body: dict):
+        try:
+            return durable_tasks.create(await owner(request), body)
+        except (DurableConflict, ValueError, KeyError) as exc:
+            durable_error(exc)
+
+    @app.get('/api/durable/tasks')
+    async def durable_list(request: Request):
+        return {'tasks': durable_tasks.list(await owner(request))}
+
+    @app.get('/api/durable/worker-state')
+    async def durable_worker_state(request: Request):
+        await owner(request)
+        return durable_tasks.queue_state()
+
+    @app.get('/api/durable/tasks/{task_id}')
+    async def durable_get(request: Request, task_id: str):
+        try:
+            return durable_tasks.get(await owner(request), task_id)
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.get('/api/durable/tasks/{task_id}/runs')
+    async def durable_runs(request: Request, task_id: str):
+        try:
+            return {'runs': durable_tasks.runs(await owner(request), task_id)}
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.post('/api/durable/tasks/{task_id}/resume')
+    async def durable_resume(request: Request, task_id: str, body: dict):
+        try:
+            return durable_tasks.resume(await owner(request), task_id, body)
+        except (DurableConflict, KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.post('/api/durable/tasks/{task_id}/pause')
+    async def durable_pause(request: Request, task_id: str, body: dict):
+        try:
+            return durable_tasks.pause(await owner(request), task_id, body)
+        except (DurableConflict, KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.post('/api/durable/tasks/{task_id}/complete')
+    async def durable_complete(request: Request, task_id: str, body: dict):
+        try:
+            return durable_tasks.complete(await owner(request), task_id, body)
+        except (DurableConflict, KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.post('/api/durable/tasks/{task_id}/reconcile-research')
+    async def durable_reconcile_research(request: Request, task_id: str, body: dict):
+        try:
+            return durable_tasks.reconcile_research(await owner(request), task_id, body)
+        except (DurableConflict, KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.post('/api/durable/tasks/{task_id}/members')
+    async def durable_grant(request: Request, task_id: str, body: dict):
+        try:
+            return durable_tasks.grant(await owner(request), task_id, body)
+        except (DurableConflict, KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.get('/api/durable/tasks/{task_id}/runs/{run_id}/artifacts/{name}')
+    async def durable_artifact(request: Request, task_id: str, run_id: str, name: str):
+        try:
+            data, entry = durable_tasks.artifact(await owner(request), task_id, run_id, name)
+        except (KeyError, ValueError, FileNotFoundError) as exc:
+            durable_error(exc)
+        return Response(data, media_type='application/octet-stream', headers={
+            'Content-Disposition': f'attachment; filename="{name}"', 'X-Content-SHA256': entry['sha256']})
 
     @app.get('/api/agent/images')
     async def agent_images():

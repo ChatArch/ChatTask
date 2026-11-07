@@ -13,6 +13,12 @@ ChatTask 从 0.1.0 版本起提供可复用的任务模板、受信 Git 源码�
 
 ChatTask 的主模型是 **任务 → Codex + Sandbox → 结果**。任务说明和所选镜像决定工作内容；发包只是示例，不是执行器的固定步骤。当前源码提供 `chattask run` 和受站点登录保护的 `/api/agent/tasks`，结果保存原生事件、产物摘要和 Sandbox 回收证据。镜像预装 infra，运行时 env 只注入服务端选择的模型/工具凭据；优先使用短期受限网关，不把原始 GitHub/PyPI 凭据交给 guest。参见[通用任务、Python 发包模板与网关边界](docs/tasks.md)。源码能力不等于 PyPI 或线上已更新。
 
+### 长期任务候选
+
+“长期任务”视图和 `chattask task` 命令保存稳定 Task 与逐轮 Run；独立 `chattask worker --env-profile site --operator operator` 处理队列。每轮保存受限的工作区与原生 Codex 会话检查点，后续轮次在新 Sandbox 原生接续。暂停是排队前或本轮结束时的协作式操作。生产部署须单独核验真实镜像、网关、原服务和浏览器；详见[长期任务合约](docs/tasks.md#长期任务候选)。
+
+显式选择 `research` 时，可提交已核对来源记录，也可通过受限的 arXiv 摘要自动检索创建；后者只保存摘要，不代表读过论文全文。受信 worker 在本轮原生执行及清理通过后，将 `result/research/main.tex` 等文件发布到配置的原 Overleaf 工程，并把实际 PDF/源码回读作为本轮产物。未知外部写入保持阻塞，需显式同操作核对。普通开发任务不依赖 Overleaf 配置。
+
 ## 从源码使用
 
 ### Workspace 材料分析

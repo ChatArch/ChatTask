@@ -43,4 +43,4 @@ where = ["src"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-chattask = ["web_static/*.html", "web_static/*.css", "web_static/*.js"]
+chattask = ["web_static/*.html", "web_static/*.css", "web_static/*.js", "overleaf_native.mjs"]

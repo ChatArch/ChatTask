@@ -13,6 +13,12 @@ Starting with 0.1.0, ChatTask adds reusable task templates, trusted Git snapshot
 
 The product model is **task → Codex + Sandbox → result**. Instructions and a selected image determine the work; publishing is an example, not the engine's fixed workflow. Current source exposes `chattask run` and authenticated `/api/agent/tasks`, with native events, output digests and Sandbox cleanup evidence. Images supply infrastructure; runtime env injects server-selected model/tool access. Prefer constrained short-lived gateways and keep original GitHub/PyPI credentials outside the guest. See [generic tasks and images](docs/tasks.en.md). Source capabilities do not imply a public release or live deployment.
 
+### Long-term Task candidate
+
+The long-term Task view and `chattask task` commands store a stable Task and per-round Runs. An independent `chattask worker --env-profile site --operator operator` processes the queue. Each round saves a bounded workspace and native Codex session checkpoint for a new Sandbox round. Pause takes effect before a queued round or after the current round ends. Production readiness requires separate acceptance of the deployed image, gateway, original service and browser; see the [contract](docs/tasks.en.md#long-term-task-candidate).
+
+Explicit `research` rounds use caller-verified source records or a bounded automatic search of official arXiv abstracts. Automated discovery does not read full papers or guarantee relevance. After native execution, checkpoint and cleanup pass, the trusted worker publishes `result/research/main.tex` and companion files into the configured original Overleaf service, storing actual PDF/source readback on that same Run. An unknown external write stays blocked until explicit same-operation reconciliation. Development tasks do not require Overleaf configuration.
+
 ## Run from source
 
 ### Workspace material analysis

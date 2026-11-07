@@ -44,13 +44,21 @@ def test_arxiv_untrusted_feed_fails_closed(payload):
         discover_arxiv("valid query", fetch=lambda _: payload)
 
 
-def test_authenticated_auto_research_creates_owner_bound_task_without_model_execution(tmp_path, monkeypatch):
+@pytest.mark.parametrize('feed,expected_source', [
+    (ATOM, 'arxiv-2601.01234v2'),
+    (b'''<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/abs/astro-ph/0701001</id><title>Legacy paper</title><updated>2007-01-01T00:00:00Z</updated><summary>Legacy abstract.</summary></entry></feed>''',
+     'arxiv-legacy-617374726f2d70682f30373031303031'),
+])
+def test_authenticated_auto_research_creates_owner_bound_task_without_model_execution(tmp_path, monkeypatch, feed, expected_source):
     from chattask import TaskSettings, create_app
     from chattask.workflow import TaskStore, WorkflowService
     from chattask.agent_tasks import AgentTaskService
     from chattask.durable import DurableTaskService
     from chattask import research_discovery
-    monkeypatch.setattr(research_discovery, "_fetch_arxiv", lambda _: ATOM)
+    monkeypatch.setattr(research_discovery, "_fetch_arxiv", lambda _: feed)
+    async def inline(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+    monkeypatch.setattr(asyncio, 'to_thread', inline)
     store = TaskStore(tmp_path / "state")
     class Runner:
         images = {"python": "example.test/fixed:1"}
@@ -74,7 +82,8 @@ def test_authenticated_auto_research_creates_owner_bound_task_without_model_exec
             result=await c.post('/api/durable/research/auto',json=body,headers={"Origin":"http://testserver","X-CSRF-Token":login.json()['csrf_token']})
             assert result.status_code==200, result.text
             task=result.json();assert task['workflow']=='research' and task['owner']=='site-operator' and task['status']=='queued'
-            rounds=durable.runs('site-operator',task['id']);assert len(rounds)==1 and len(rounds[0]['source_records'])==2
+            rounds=durable.runs('site-operator',task['id']);assert len(rounds)==1 and len(rounds[0]['source_records'])==len(feed.split(b'<entry>'))-1
+            assert rounds[0]['source_records'][0]['id'] == expected_source
             assert rounds[0]['source_records'][0]['read_scope'].endswith('full paper not retrieved')
             monkeypatch.setattr(research_discovery, "_fetch_arxiv", lambda _: (_ for _ in ()).throw(AssertionError("duplicate discovery request")))
             again=await c.post('/api/durable/research/auto',json=body,headers={"Origin":"http://testserver","X-CSRF-Token":login.json()['csrf_token']});assert again.status_code==200 and again.json()['id']==task['id']

@@ -121,16 +121,19 @@ class CodexTaskExecutor:
     async def reconcile_durable(self,run):
         """Allow a new writer only after exact owned-container absence and lease closure."""
         sandbox_id, receipt = run.get('sandbox_id'), run.get('runtime_receipt')
-        if not sandbox_id or not isinstance(receipt,dict):
+        if not run.get('phase') and (not sandbox_id or not isinstance(receipt,dict)):
             return False
         try:
-            matched=[container for container in self.task_service.docker.containers.list(all=True)
-                     if container.name=='sandbox-'+sandbox_id]
-            if len(matched)>1:
+            finder=getattr(self.task_service,'find_run_sandboxes',None)
+            if finder is not None:
+                # Controller metadata catches a created Sandbox whose response/id was lost.
+                if await finder(run['id']):return False
+            elif not sandbox_id or not isinstance(receipt,dict):
                 return False
-            if matched:
-                # Never destroy or assume a running guest is dead from a host PID.
-                return False
+            if sandbox_id:
+                matched=[container for container in self.task_service.docker.containers.list(all=True)
+                         if container.name=='sandbox-'+sandbox_id]
+                if matched:return False
             if self.gateway:
                 closed=await asyncio.to_thread(self.gateway.close,run['id'])
                 if closed!={'closed':True}:
@@ -152,13 +155,16 @@ class CodexTaskExecutor:
         service=None
         sandbox=cfg=None;outcome={'ok':False,'artifacts':[],'cleanup':{'container_absent':True,'not_created':True}}
         async with self.task_service.lock:
-            if self.gateway:
-                if durable:await update({'phase':'gateway_starting'})
-                plan=capability.get('plan')
-                if mode=='verify':plan={**plan,'verification_of':capability['source_task_id']}
-                lease=await asyncio.to_thread(self.gateway.create,task['id'],mode,plan)
-                if durable:await update({'phase':'gateway_created'})
+            gateway_intent=False
             try:
+                if self.gateway:
+                    if durable:
+                        await update({'phase':'gateway_intent'})
+                        gateway_intent=True
+                    plan=capability.get('plan')
+                    if mode=='verify':plan={**plan,'verification_of':capability['source_task_id']}
+                    lease=await asyncio.to_thread(self.gateway.create,task['id'],mode,plan)
+                    if durable:await update({'phase':'gateway_created'})
                 if lease is not None:
                     if mode=='verify':
                         runtime=replace(runtime,tool_base_url=lease.tool_base_url,tool_access_token=lease.tool_access_token)
@@ -167,7 +173,11 @@ class CodexTaskExecutor:
                                         tool_base_url=lease.tool_base_url,tool_access_token=lease.tool_access_token)
                 service=TaskService(replace(self.task_service.settings,image=self.images[task['image_profile']]),docker_client=self.task_service.docker)
                 await update({'index':0,'status':'running'})
-                sandbox,cfg,details=await service.create(ttl_seconds=(120 if mode=='verify' else runtime.seconds)+(hook[1] if hook else 0)+120)
+                if durable:await update({'phase':'sandbox_intent'})
+                create_options={'ttl_seconds':(120 if mode=='verify' else runtime.seconds)+(hook[1] if hook else 0)+120}
+                if durable:create_options['durable_run_id']=task['id']
+                if durable:outcome['cleanup']={'container_absent':False,'creation_outcome_unknown':True}
+                sandbox,cfg,details=await service.create(**create_options)
                 outcome.update(sandbox_id=sandbox.id,runtime=details,cleanup={'container_absent':False})
                 if durable:
                     await update({'phase':'sandbox_created','sandbox_id':sandbox.id,'runtime':details})
@@ -329,7 +339,7 @@ class CodexTaskExecutor:
                         outcome['cleanup']={'requested':True,'container_absent':not any(c.name=='sandbox-'+sandbox.id for c in service.docker.containers.list(all=True))}
                     except Exception:outcome['cleanup']={'requested':True,'container_absent':False}
                     if not outcome['cleanup']['container_absent']:outcome['ok']=False
-                if lease is not None:
+                if lease is not None or gateway_intent:
                     try:
                         closed=await asyncio.to_thread(self.gateway.close,task['id'])
                         if closed!={'closed':True}:raise ValueError('lease closure unconfirmed')

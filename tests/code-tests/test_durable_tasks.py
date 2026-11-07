@@ -378,7 +378,8 @@ def test_sandbox_identity_receipt_is_reported_before_command_failure():
                 None, save, update)
 
     asyncio.run(run())
-    assert progress[1] == {'phase': 'sandbox_created', 'sandbox_id': 'synthetic-sandbox', 'runtime': receipt}
+    assert progress[1] == {'phase': 'sandbox_intent'}
+    assert progress[2] == {'phase': 'sandbox_created', 'sandbox_id': 'synthetic-sandbox', 'runtime': receipt}
 
 
 def test_executor_lock_is_held_by_real_other_process(tmp_path):

@@ -15,9 +15,11 @@ import io
 import json
 import os
 import re
+import secrets
 import subprocess
 import tempfile
 import threading
+import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +35,13 @@ CONTAINER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 FRAME = "@@CHATTASK_RESEARCH_NATIVE_V1@@"
 MAX_PDF = 20 * 1024 * 1024
 MAX_SOURCE_ZIP = 8 * 1024 * 1024
+NATIVE_DEADLINE_GRACE_NS = 14 * 60 * 1_000_000_000
+TEX_COMMANDS = frozenset({"author", "begin", "bibitem", "cite", "date", "documentclass",
+                          "emph", "end", "hline", "item", "maketitle", "section",
+                          "subsection", "setlength", "small", "tabcolsep", "texttt",
+                          "title", "url", "usepackage", "_", "\\"})
+TEX_ENVIRONMENTS = frozenset({"document", "abstract", "enumerate", "thebibliography", "longtable"})
+TEX_PACKAGES = frozenset({"geometry", "url", "longtable"})
 
 
 class ResearchError(ValueError):
@@ -62,6 +71,30 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _now_ns() -> int:
+    return time.time_ns()
+
+
+def _process_state(pid: int) -> tuple[str, str | None]:
+    """Return running with boot/start identity, exited, or unknown on /proc failure."""
+    if not isinstance(pid, int) or pid <= 0:
+        return ("unknown", None)
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return ("exited", None)
+    except OSError:
+        return ("unknown", None)
+    try:
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        start_ticks = stat.rsplit(")", 1)[1].split()[19]
+        if not boot or not start_ticks.isdecimal():
+            return ("unknown", None)
+        return ("running", f"{boot}:{start_ticks}")
+    except (OSError, IndexError, ValueError):
+        return ("unknown", None)
+
+
 def _atomic(path: Path, data: bytes) -> None:
     fd, temp = tempfile.mkstemp(prefix=".research-", dir=path.parent)
     try:
@@ -85,6 +118,69 @@ def _json_write(path: Path, value: dict) -> None:
     _atomic(path, (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode())
 
 
+def _check_tex(main: str) -> None:
+    """Accept only the first-slice manuscript syntax; this is not TeX isolation."""
+    if "^^" in main or any(ch in main for ch in "%#$") or "\r" in main:
+        raise ResearchError("unsafe TeX syntax")
+    tokens = re.findall(r"\\([A-Za-z@]+|.)", main, re.S)
+    if any(token not in TEX_COMMANDS for token in tokens):
+        raise ResearchError("unsupported TeX command")
+    class_match = re.match(r"\s*\\documentclass(?:\[UTF8,11pt,a4paper\])?\{ctexart\}", main)
+    if not class_match or tokens.count("documentclass") != 1:
+        raise ResearchError("unsupported TeX document class")
+    packages = list(re.finditer(r"\\usepackage(?:\[([^\]\n]*)\])?\{([^{}\n]+)\}", main))
+    if len(packages) != tokens.count("usepackage"):
+        raise ResearchError("unsupported TeX package syntax")
+    for package in packages:
+        options, name = package.groups()
+        if name not in TEX_PACKAGES or (options is not None and
+            (name != "geometry" or not re.fullmatch(r"margin=[1-9][0-9]{0,2}(?:mm|cm|in)", options))):
+            raise ResearchError("unsupported TeX package")
+    urls = list(re.finditer(r"\\url\{([^{}\\\n]+)\}", main))
+    if len(urls) != tokens.count("url"):
+        raise ResearchError("unsupported TeX URL syntax")
+    for match in urls:
+        try:
+            parsed = urlsplit(match.group(1))
+        except ValueError:
+            raise ResearchError("unsupported TeX URL") from None
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+            raise ResearchError("unsupported TeX URL")
+    lengths = list(re.finditer(r"\\setlength\{\\tabcolsep\}\{[1-9][0-9]?pt\}", main))
+    if len(lengths) != tokens.count("setlength"):
+        raise ResearchError("unsupported TeX length")
+    depth = 0
+    for char in main:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth < 0:
+                raise ResearchError("unbalanced TeX braces")
+    if depth:
+        raise ResearchError("unbalanced TeX braces")
+    environments = list(re.finditer(r"\\(begin|end)\{([^{}\n]+)\}", main))
+    if len(environments) != tokens.count("begin") + tokens.count("end"):
+        raise ResearchError("unsupported TeX environment syntax")
+    stack: list[str] = []
+    for match in environments:
+        kind, name = match.groups()
+        if name not in TEX_ENVIRONMENTS:
+            raise ResearchError("unsupported TeX environment")
+        if kind == "begin":
+            if not stack and name != "document":
+                raise ResearchError("TeX document must be outermost")
+            if stack and name == "document":
+                raise ResearchError("nested TeX document")
+            stack.append(name)
+        elif not stack or stack.pop() != name:
+            raise ResearchError("unbalanced TeX environment")
+    if stack or not environments or environments[0].groups() != ("begin", "document") or environments[-1].groups() != ("end", "document"):
+        raise ResearchError("incomplete TeX document")
+    if main[environments[-1].end():].strip():
+        raise ResearchError("TeX content after document end")
+
+
 def _check_files(files: Mapping[str, str]) -> dict[str, str]:
     if not isinstance(files, Mapping) or not 1 <= len(files) <= 20:
         raise ResearchError("file count must be between 1 and 20")
@@ -105,12 +201,9 @@ def _check_files(files: Mapping[str, str]) -> dict[str, str]:
     if total > 4 * 1024 * 1024:
         raise ResearchError("files exceed 4 MiB")
     main = out.get("main.tex")
-    if not main or not re.search(r"\\documentclass(?:\[[^\]]*\])?\{ctexart\}", main):
+    if not main:
         raise ResearchError("self-contained ctexart main.tex is required")
-    if "\\begin{document}" not in main or "\\end{document}" not in main:
-        raise ResearchError("main.tex must contain a complete document")
-    if re.search(r"\\(?:input|include|includegraphics|bibliography|addbibresource|usepackage\s*\{(?:minted|shellesc)|write18)\b", main):
-        raise ResearchError("external TeX assets and execution are unsupported")
+    _check_tex(main)
     if "references.bib" in out and "\\begin{thebibliography}" not in main:
         raise ResearchError("main.tex must include an inline bibliography")
     return out
@@ -129,6 +222,8 @@ def _validate_ids(task_id: str, run_id: str, request_id: str, expected_root_doc_
 
 class DockerOverleafBridge:
     """Operator-configured native script transport for the original container."""
+
+    tracks_native_process = True
 
     def __init__(self, container_name: str, origin: str):
         if not isinstance(container_name, str) or not CONTAINER.fullmatch(container_name):
@@ -149,7 +244,7 @@ class DockerOverleafBridge:
             raise ResearchError("invalid native project id")
         return f"{self.origin}/project/{project_id}"
 
-    def __call__(self, payload: dict) -> dict:
+    def __call__(self, payload: dict, *, on_start=None, on_exit=None) -> dict:
         # Code is a packaged static asset. Only validated JSON goes over stdin.
         script = Path(__file__).with_name("overleaf_native.mjs").read_text()
         argv = ["docker", "exec", "-i", "-w", "/overleaf/services/web", self.container_name,
@@ -158,17 +253,41 @@ class DockerOverleafBridge:
         try:
             proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True)
+            identity = None
+            if on_start is not None:
+                status, identity = _process_state(proc.pid)
+                if status != "running" or identity is None:
+                    # No request was sent. Close stdin and reap without signals.
+                    if proc.stdin is not None:
+                        proc.stdin.close()
+                    threading.Thread(target=lambda: proc.wait(), daemon=True).start()
+                    raise ResearchUnavailable("Docker client process identity unavailable")
+                try:
+                    on_start(proc.pid, identity)
+                except Exception:
+                    if proc.stdin is not None:
+                        proc.stdin.close()
+                    threading.Thread(target=lambda: proc.wait(), daemon=True).start()
+                    raise ResearchUnavailable("native intent could not be persisted") from None
             try:
                 output, _stderr = proc.communicate(input=json.dumps(request), timeout=840)
             except subprocess.TimeoutExpired:
-                # Do not signal Docker. The native helper has its own 13-minute
-                # deadline and will frame an unknown outcome before normal exit.
-                # Reap privately; the journal keeps the host Docker client PID.
-                threading.Thread(target=lambda: proc.communicate(), daemon=True).start()
+                # Do not signal Docker. Retain the process and record a safe
+                # exit receipt only if its framed result eventually arrives.
+                def drain():
+                    try:
+                        late_output, _ = proc.communicate()
+                        if on_exit is not None:
+                            on_exit(proc.pid, identity, proc.returncode, self._safe_frame(late_output))
+                    except Exception:
+                        pass
+                threading.Thread(target=drain, daemon=True).start()
                 raise ResearchUnavailable("native operation pending; reconcile before retry",
                                           host_docker_client_pid=proc.pid) from None
         except OSError:
             raise ResearchUnavailable("native service execution unavailable") from None
+        if on_exit is not None:
+            on_exit(proc.pid, identity, proc.returncode, self._safe_frame(output))
         # The upstream logger can write anything. Expose only our framed object.
         frames = [line[len(FRAME):] for line in output.splitlines() if line.startswith(FRAME)]
         if proc.returncode or len(frames) != 1:
@@ -180,6 +299,20 @@ class DockerOverleafBridge:
         if not isinstance(result, dict):
             raise ResearchUnavailable("invalid native receipt")
         return result
+
+    @staticmethod
+    def _safe_frame(output: str) -> dict | None:
+        frames = [line[len(FRAME):] for line in output.splitlines() if line.startswith(FRAME)]
+        if len(frames) != 1:
+            return None
+        try:
+            parsed = json.loads(frames[0])
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(parsed, dict) or parsed.get("status") not in ("ok", "error", "conflict", "unknown"):
+            return None
+        code = parsed.get("code")
+        return {"status": parsed["status"], "code": code if isinstance(code, str) and len(code) <= 64 else None}
 
 
 class ResearchPublisher:
@@ -234,6 +367,9 @@ class ResearchPublisher:
             if _digest(pdf) != receipt["pdf_sha256"] or _digest(source) != receipt["source_zip_sha256"]:
                 raise ResearchUnavailable("stored receipt bytes failed verification")
             return ResearchResult(receipt, pdf, source)
+        tracked = isinstance(self.bridge, DockerOverleafBridge)
+        if old and tracked:
+            self._reconcile_native(task_dir, state, run_id, digest_map, fingerprint, task_id, expected)
         if not old:
             state["runs"][run_id] = {"fingerprint": fingerprint, "status": "pending", "request_id": request_id,
                                       "file_sha256": digest_map, "expected_root_doc_id": expected,
@@ -242,8 +378,24 @@ class ResearchPublisher:
         payload = {"action": "publish", "task_id": task_id, "run_id": run_id, "request_id": request_id,
                    "files": files, "file_sha256": digest_map, "expected_root_doc_id": expected,
                    "project_id": state["project_id"]}
+        if tracked:
+            intent = {"id": secrets.token_hex(16), "action": "publish", "fingerprint": fingerprint,
+                      "first_call_unix_ns": _now_ns(), "pid": None, "process_start_identity": None}
+            state["runs"][run_id]["native_intent"] = intent
+            _json_write(state_path, state)
+
+            def on_start(pid: int, identity: str) -> None:
+                intent["pid"] = pid
+                intent["process_start_identity"] = identity
+                _json_write(state_path, state)
+
+            def on_exit(pid: int, identity: str, returncode: int | None, frame: dict | None) -> None:
+                exit_receipt = {"intent_id": intent["id"], "fingerprint": fingerprint,
+                                "pid": pid, "process_start_identity": identity,
+                                "returncode": returncode, "frame": frame}
+                _json_write(task_dir / f"{run_id}.{intent['id']}.helper-exit.json", exit_receipt)
         try:
-            result = self.bridge(payload)
+            result = self.bridge(payload, on_start=on_start, on_exit=on_exit) if tracked else self.bridge(payload)
             if inspect.isawaitable(result):
                 result = asyncio.run(result)
             verified = self._verify_native(result, run_id, files, expected)
@@ -270,6 +422,54 @@ class ResearchPublisher:
             raise
         except Exception:
             raise ResearchUnavailable("native operation outcome unknown; inspect pending journal") from None
+
+    def _reconcile_native(self, task_dir: Path, state: dict, run_id: str, digests: dict[str, str],
+                          fingerprint: str, task_id: str, expected: str | None) -> None:
+        intent = state["runs"][run_id].get("native_intent")
+        if not isinstance(intent, dict) or intent.get("action") != "publish" or intent.get("fingerprint") != fingerprint:
+            raise ResearchUnavailable("pending native operation lacks exact ownership; supervisor reconciliation required")
+        pid, identity = intent.get("pid"), intent.get("process_start_identity")
+        first_call = intent.get("first_call_unix_ns")
+        if not isinstance(pid, int) or not isinstance(identity, str) or not isinstance(first_call, int):
+            raise ResearchUnavailable("pending native operation ownership unavailable")
+        status, current_identity = _process_state(pid)
+        if status == "running" and current_identity == identity:
+            raise ResearchUnavailable("prior native helper still running")
+        exit_path = task_dir / f"{run_id}.{intent['id']}.helper-exit.json"
+        exit_receipt = json.loads(exit_path.read_text()) if exit_path.exists() else None
+        safe_exit = (isinstance(exit_receipt, dict) and exit_receipt.get("intent_id") == intent["id"] and
+                     exit_receipt.get("fingerprint") == fingerprint and exit_receipt.get("pid") == pid and
+                     exit_receipt.get("process_start_identity") == identity and exit_receipt.get("returncode") == 0 and
+                     isinstance(exit_receipt.get("frame"), dict) and
+                     exit_receipt["frame"].get("status") in ("ok", "error", "conflict"))
+        if not safe_exit and (status == "unknown" or _now_ns() < first_call + NATIVE_DEADLINE_GRACE_NS):
+            raise ResearchUnavailable("prior native outcome remains ambiguous")
+        payload = {"action": "readback", "task_id": task_id, "run_id": run_id,
+                   "file_sha256": digests, "project_id": state["project_id"]}
+        try:
+            readback = self.bridge(payload)
+        except Exception:
+            raise ResearchUnavailable("native reconciliation readback unavailable") from None
+        if not isinstance(readback, dict) or readback.get("status") != "ok" or readback.get("owner_verified") is not True or readback.get("provenance") != "original-service-document-readback":
+            raise ResearchUnavailable("native reconciliation readback unverified")
+        if readback.get("project_exists") is False:
+            if state["project_id"] or readback.get("source_files") != {} or set(readback.get("missing_files", [])) != set(digests):
+                raise ResearchConflict("native project binding changed")
+            return
+        project_id = readback.get("project_id")
+        if readback.get("project_exists") is not True or not isinstance(project_id, str) or not OBJECT_ID.fullmatch(project_id) or (state["project_id"] and state["project_id"] != project_id):
+            raise ResearchConflict("native project binding changed")
+        current_files = readback.get("source_files")
+        missing = readback.get("missing_files")
+        if not isinstance(current_files, dict) or not isinstance(missing, list) or set(current_files) & set(missing) or set(current_files) | set(missing) != set(digests):
+            raise ResearchUnavailable("incomplete native reconciliation inventory")
+        for name, body in current_files.items():
+            if not isinstance(body, str) or _digest(body.encode()) != digests[name]:
+                raise ResearchConflict("native document changed during reconciliation")
+        root = readback.get("root_doc_id")
+        round_root = readback.get("round_root_doc_id")
+        if root != expected and (not round_root or root != round_root):
+            raise ResearchConflict("native root changed during reconciliation")
 
     @staticmethod
     def _verify_native(result: dict, run_id: str, files: dict[str, str], expected: str | None) -> dict:
@@ -359,7 +559,9 @@ def research_instructions(topic: str, source_records: list[dict], followup: bool
             "Do not invent experiments, measurements, quotations, or conclusions. Synthesize evidence and identify open questions. "
             "Write /workspace/result/research/main.tex as a self-contained ctexart document for xelatex with an inline thebibliography; "
             "write /workspace/result/research/references.bib as a reusable mirror, /workspace/result/research/report.md, and /workspace/result/research/sources.json. "
-            "Keep all TeX assets inline; do not use external inputs or shell escape. Cite only records actually read.\n")
+            "Keep all TeX assets inline. Use only ctexart, geometry/url/longtable packages, document/abstract/enumerate/thebibliography/longtable environments, "
+            "and ordinary title, author, date, section, citation, bibliography, table, emphasis, texttt and URL commands. "
+            "No custom macros, raw comments, external inputs, or shell escape. Cite only records actually read.\n")
     if len(instruction) > 16000:
         raise ResearchError("source metadata exceeds Task instruction limit")
     return instruction

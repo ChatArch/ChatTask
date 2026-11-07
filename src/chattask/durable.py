@@ -76,7 +76,7 @@ class DurableTaskService:
     def _public_run(self, run):
         return {key: run[key] for key in _RUN_PUBLIC if key in run}
 
-    def create(self, actor, body):
+    def create(self, actor, body, *, _auto_discovery=None):
         self._request(body, {"request_id", "instructions", "image_profile", "workflow", "source_records"})
         instructions = self._instructions(body.get("instructions"))
         image = body.get("image_profile")
@@ -101,6 +101,17 @@ class DurableTaskService:
         with self.store.locked():
             for prior in self.store.list("durable_tasks"):
                 if prior["owner"] == actor and prior["create_request_id"] == body["request_id"]:
+                    if _auto_discovery is not None:
+                        if prior.get('auto_discovery') != _auto_discovery:
+                            raise DurableConflict("request_id input conflict")
+                        try:
+                            self.store.get('durable_runs', prior['latest_run_id'])
+                        except FileNotFoundError:
+                            # The first atomic Task write survived an interrupted Run write.
+                            self.store.put('durable_runs', prior['latest_run_id'], prior['auto_initial_run'])
+                        return self._public_task(prior)
+                    if prior.get('auto_discovery') is not None:
+                        raise DurableConflict("request_id input conflict")
                     if prior["create_fingerprint"] != fingerprint:
                         legacy = _fingerprint({"instructions": instructions, "image_profile": image})
                         if prior.get('workflow', 'development') != 'development' or workflow != 'development' or sources or prior['create_fingerprint'] != legacy:
@@ -128,8 +139,14 @@ class DurableTaskService:
                     "pause_requested": False, "generation": 0,
                     "create_request_id": body["request_id"], "create_fingerprint": fingerprint,
                     "controls": {}}
-            self.store.put("durable_runs", run_id, run)
-            self.store.put("durable_tasks", task_id, task)
+            if _auto_discovery is not None:
+                task['auto_discovery'] = _auto_discovery
+                task['auto_initial_run'] = run
+                self.store.put("durable_tasks", task_id, task)
+                self.store.put("durable_runs", run_id, run)
+            else:
+                self.store.put("durable_runs", run_id, run)
+                self.store.put("durable_tasks", task_id, task)
             return self._public_task(task)
 
     async def create_auto_research(self, actor, body):
@@ -149,17 +166,15 @@ class DurableTaskService:
                 if prior['owner'] == actor and prior['create_request_id'] == body['request_id']:
                     if prior.get('auto_discovery') != metadata:
                         raise DurableConflict('request_id input conflict')
+                    try:
+                        self.store.get('durable_runs', prior['latest_run_id'])
+                    except FileNotFoundError:
+                        self.store.put('durable_runs', prior['latest_run_id'], prior['auto_initial_run'])
                     return self._public_task(prior)
         sources = await asyncio.to_thread(discover_arxiv, query, max_results=maximum)
-        created = self.create(actor, {'request_id': body['request_id'], 'instructions': instructions,
-                                      'image_profile': image, 'workflow': 'research', 'source_records': sources})
-        with self.store.locked():
-            task = self.store.get('durable_tasks', created['id'])
-            if task.get('auto_discovery') not in (None, metadata):
-                raise DurableConflict('request_id input conflict')
-            task['auto_discovery'] = metadata
-            self.store.put('durable_tasks', task['id'], task)
-        return created
+        return self.create(actor, {'request_id': body['request_id'], 'instructions': instructions,
+                                   'image_profile': image, 'workflow': 'research', 'source_records': sources},
+                           _auto_discovery=metadata)
 
     def get(self, actor, ident):
         return self._public_task(self._raw_task(actor, ident))

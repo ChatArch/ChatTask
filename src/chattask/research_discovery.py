@@ -65,7 +65,9 @@ def discover_arxiv(query: str, *, max_results: int = 3, fetch=None) -> list[dict
             raise ValueError("arXiv update date missing") from exc
         if not title or not abstract or len(title) > 180 or len(abstract) > 4000:
             raise ValueError("arXiv title or abstract missing or oversized")
-        records.append({"id": "arxiv-" + identifier, "url": "https://arxiv.org/abs/" + identifier,
+        source_id = ("arxiv-legacy-" + identifier.encode('ascii').hex()
+                     if '/' in identifier else "arxiv-" + identifier)
+        records.append({"id": source_id, "url": "https://arxiv.org/abs/" + identifier,
                         "title": title, "content": abstract,
                         "retrieved_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                         "read_scope": "arXiv Atom abstract only; full paper not retrieved"})

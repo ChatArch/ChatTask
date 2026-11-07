@@ -18,12 +18,64 @@ const ID = /^[0-9a-f]{32}$/
 const OID = /^[0-9a-f]{24}$/
 const FILE = /^[A-Za-z][A-Za-z0-9_-]{0,63}\.(tex|bib|md|json)$/
 const MAX_PDF = 20 * 1024 * 1024
+const TEX_COMMANDS = new Set(['author', 'begin', 'bibitem', 'cite', 'date', 'documentclass',
+  'emph', 'end', 'hline', 'item', 'maketitle', 'section', 'subsection', 'setlength',
+  'small', 'tabcolsep', 'texttt', 'title', 'url', 'usepackage', '_', '\\'])
+const TEX_ENVIRONMENTS = new Set(['document', 'abstract', 'enumerate', 'thebibliography', 'longtable'])
+const TEX_PACKAGES = new Set(['geometry', 'url', 'longtable'])
 
 function fail(code) { throw Object.assign(new Error('research native operation failed'), { safeCode: code }) }
 function hash(value) { return crypto.createHash('sha256').update(value).digest('hex') }
 function asId(value) { if (typeof value !== 'string' || !OID.test(value)) fail('invalid-id'); return value }
 function describe(taskId) { return `chattask-research:${taskId}` }
 function projectName(taskId) { return `ChatTask Research ${taskId}` }
+
+function validateTex(main) {
+  // Strict first-slice syntax. This filter is not a claim of TeX engine isolation.
+  if (main.includes('^^') || /[%#$\r]/.test(main)) fail('unsafe-tex-syntax')
+  const tokens = [...main.matchAll(/\\([A-Za-z@]+|[\s\S])/g)].map(match => match[1])
+  if (tokens.some(token => !TEX_COMMANDS.has(token))) fail('unsupported-tex-command')
+  if (!/^\s*\\documentclass(?:\[UTF8,11pt,a4paper\])?\{ctexart\}/.test(main) ||
+      tokens.filter(token => token === 'documentclass').length !== 1) fail('invalid-main')
+  const packages = [...main.matchAll(/\\usepackage(?:\[([^\]\n]*)\])?\{([^{}\n]+)\}/g)]
+  if (packages.length !== tokens.filter(token => token === 'usepackage').length) fail('invalid-package')
+  for (const match of packages) {
+    const [, options, name] = match
+    if (!TEX_PACKAGES.has(name) || (options !== undefined &&
+        (name !== 'geometry' || !/^margin=[1-9][0-9]{0,2}(?:mm|cm|in)$/.test(options)))) fail('invalid-package')
+  }
+  const urls = [...main.matchAll(/\\url\{([^{}\\\n]+)\}/g)]
+  if (urls.length !== tokens.filter(token => token === 'url').length) fail('invalid-url')
+  for (const match of urls) {
+    let url
+    try { url = new URL(match[1]) } catch { fail('invalid-url') }
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) fail('invalid-url')
+  }
+  const lengths = [...main.matchAll(/\\setlength\{\\tabcolsep\}\{[1-9][0-9]?pt\}/g)]
+  if (lengths.length !== tokens.filter(token => token === 'setlength').length) fail('invalid-length')
+  let depth = 0
+  for (const char of main) {
+    if (char === '{') depth++
+    if (char === '}' && --depth < 0) fail('unbalanced-braces')
+  }
+  if (depth !== 0) fail('unbalanced-braces')
+  const environments = [...main.matchAll(/\\(begin|end)\{([^{}\n]+)\}/g)]
+  if (environments.length !== tokens.filter(token => token === 'begin' || token === 'end').length) fail('invalid-environment')
+  const stack = []
+  for (const match of environments) {
+    const [, kind, name] = match
+    if (!TEX_ENVIRONMENTS.has(name)) fail('invalid-environment')
+    if (kind === 'begin') {
+      if ((!stack.length && name !== 'document') || (stack.length && name === 'document')) fail('invalid-environment')
+      stack.push(name)
+    } else if (!stack.length || stack.pop() !== name) fail('unbalanced-environment')
+  }
+  if (stack.length || !environments.length || environments[0][1] !== 'begin' ||
+      environments[0][2] !== 'document') fail('invalid-main')
+  const lastEnvironment = environments[environments.length - 1]
+  if (lastEnvironment[1] !== 'end' || lastEnvironment[2] !== 'document' ||
+      main.slice(lastEnvironment.index + lastEnvironment[0].length).trim()) fail('invalid-main')
+}
 
 async function readInput() {
   let text = ''
@@ -41,7 +93,16 @@ function validate(request) {
       typeof request.run_id !== 'string' || !ID.test(request.run_id)) fail('invalid-id')
   if (request.project_id != null) asId(request.project_id)
   if (request.expected_root_doc_id != null) asId(request.expected_root_doc_id)
-  if (request.action === 'readback') return
+  if (request.action === 'readback') {
+    const hashes = request.file_sha256
+    if (!hashes || typeof hashes !== 'object' || Array.isArray(hashes) ||
+        Object.keys(hashes).length < 1 || Object.keys(hashes).length > 20 ||
+        !Object.hasOwn(hashes, 'main.tex')) fail('invalid-readback')
+    for (const [name, digest] of Object.entries(hashes)) {
+      if (!FILE.test(name) || typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) fail('invalid-readback')
+    }
+    return
+  }
   const files = request.files
   if (!files || typeof files !== 'object' || Array.isArray(files) ||
       Object.keys(files).length < 1 || Object.keys(files).length > 20) fail('invalid-files')
@@ -55,9 +116,8 @@ function validate(request) {
     if (request.file_sha256?.[name] !== hash(Buffer.from(body))) fail('digest-mismatch')
   }
   if (total > 4 * 1024 * 1024) fail('files-too-large')
-  if (typeof files['main.tex'] !== 'string' || !/\\documentclass(?:\[[^\]]*\])?\{ctexart\}/.test(files['main.tex']) ||
-      !files['main.tex'].includes('\\begin{document}') || !files['main.tex'].includes('\\end{document}') ||
-      /\\(?:input|include|includegraphics|bibliography|addbibresource|write18)\b/.test(files['main.tex'])) fail('invalid-main')
+  if (typeof files['main.tex'] !== 'string') fail('invalid-main')
+  validateTex(files['main.tex'])
   if (files['references.bib'] != null && !files['main.tex'].includes('\\begin{thebibliography}')) fail('invalid-main')
 }
 
@@ -70,7 +130,7 @@ async function owner() {
   return users[0]._id
 }
 
-async function findProject(taskId, ownerId, boundId, create) {
+async function findProject(taskId, ownerId, boundId, create, allowMissing = false) {
   const name = projectName(taskId)
   const projects = await Project.find({ name, owner_ref: ownerId },
     { _id: 1, name: 1, description: 1, owner_ref: 1, compiler: 1,
@@ -83,6 +143,7 @@ async function findProject(taskId, ownerId, boundId, create) {
         (boundId && String(project._id) !== boundId)) fail('project-binding-conflict')
     return project
   }
+  if (!create && allowMissing) return null
   if (boundId || !create) fail('project-missing')
   const created = await ProjectCreationHandler.promises.createBlankProject(ownerId, name, {
     compiler: 'xelatex', publicAccesLevel: 'private', description: describe(taskId),
@@ -181,13 +242,24 @@ async function execute(request) {
   const ownerId = await owner()
   if (request.action === 'probe') return { status: 'ok', owner_verified: true }
   let project = await findProject(request.task_id, ownerId, request.project_id || null,
-    request.action === 'publish')
+    request.action === 'publish', request.action === 'readback')
   if (request.action === 'readback') {
     const names = Object.keys(request.file_sha256 || {})
-    return { status: 'ok', project_id: String(project._id), owner_verified: true,
-      root_doc_id: project.rootDoc_id ? String(project.rootDoc_id) : null,
-      source_files: await getRoundFiles(project, request.run_id, names),
+    if (!project) return { status: 'ok', project_exists: false, owner_verified: true,
+      source_files: {}, missing_files: names, root_doc_id: null, round_root_doc_id: null,
       provenance: 'original-service-document-readback' }
+    const sourceFiles = {}
+    const missingFiles = []
+    for (const name of names) {
+      const doc = findFlatDoc(project, `r_${request.run_id}_${name}`)
+      if (doc) sourceFiles[name] = await contents(String(project._id), String(doc._id))
+      else missingFiles.push(name)
+    }
+    const root = findFlatDoc(project, `r_${request.run_id}_main.tex`)
+    return { status: 'ok', project_exists: true, project_id: String(project._id),
+      owner_verified: true, root_doc_id: project.rootDoc_id ? String(project.rootDoc_id) : null,
+      round_root_doc_id: root ? String(root._id) : null, source_files: sourceFiles,
+      missing_files: missingFiles, provenance: 'original-service-document-readback' }
   }
   project = await appendDocuments(project, ownerId, request)
   const root = await switchRoot(project, ownerId, request)

@@ -1,11 +1,62 @@
 """Behavioral slices of the static helper, with synthetic original-service modules."""
 
 import json
+import os
 import subprocess
+import zipfile
+import hashlib
 from pathlib import Path
+
+import pytest
+
+from chattask.research import ResearchError, _check_tex
 
 
 HELPER = Path(__file__).resolve().parents[2] / "src/chattask/overleaf_native.mjs"
+
+
+def _node_tex_outcomes(samples):
+    source = HELPER.read_text()
+    constants = source[source.index("const TEX_COMMANDS"):source.index("function fail(")]
+    validator = source[source.index("function validateTex("):source.index("async function readInput(")]
+    script = (constants + "\nfunction fail(code){throw Error(code)}\n" + validator +
+              "\nconst samples=" + json.dumps(samples) + ";\n" +
+              "console.log(JSON.stringify(samples.map(s=>{try{validateTex(s);return 'ok'}catch(e){return e.message}})))")
+    done = subprocess.run(["node", "--input-type=module", "--eval", script], text=True, capture_output=True, timeout=5)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+def test_rejects_hostile_tex_in_both_preflights():
+    safe = r"\documentclass{ctexart}\begin{document}Body\end{document}"
+    hostile = [safe.replace("Body", token) for token in (
+        r"\openin0=/etc/passwd\read0 to\leak", r"\catcode`\@=11", r"\csname openin\endcsname",
+        r"\directlua{os.execute('x')}", r"\write18{echo x}", r"^^5copenin0=/etc/passwd",
+        r"\usepackage{evil}", r"\url{file:///etc/passwd}", "% unsafe comment",
+        r"\begin{filecontents}{x}secret\end{filecontents}", "{unbalanced",
+    )]
+    assert _node_tex_outcomes([safe] + hostile)[0] == "ok"
+    assert all(outcome != "ok" for outcome in _node_tex_outcomes(hostile))
+    for tex in hostile:
+        with pytest.raises(ResearchError):
+            _check_tex(tex)
+
+
+@pytest.mark.parametrize("env_name,expected_sha", [
+    ("RESEARCH_FIXTURE_ZIP_FIRST", "7d197cc24dd37f6ed5e2e1760815a9dadb2ccf397f54b188a6002d6fe306438e"),
+    ("RESEARCH_FIXTURE_ZIP_SECOND", "e20e92915d1b6ec00075e423e87fddf70beb75a4e1f2a591d6adb26b79a1002e"),
+])
+def test_published_task_owned_tex_fixture(env_name, expected_sha):
+    path = os.environ.get(env_name)
+    if not path:
+        pytest.skip("read-only Task archive path supplied by supervisor/test command")
+    with zipfile.ZipFile(path) as archive:
+        names = [name for name in archive.namelist() if name.endswith("_main.tex")]
+        assert len(names) == 1
+        tex = archive.read(names[0]).decode("utf-8")
+    assert hashlib.sha256(tex.encode()).hexdigest() == expected_sha
+    _check_tex(tex)
+    assert _node_tex_outcomes([tex]) == ["ok"]
 
 
 def _native_function(start, end, body, call):

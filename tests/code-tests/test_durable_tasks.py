@@ -205,6 +205,7 @@ def test_restart_blocks_unknown_side_effects(tmp_path):
     raw_run = svc.store.get("durable_runs", run["id"])
     raw_task = svc.store.get("durable_tasks", task["id"])
     raw_run["status"] = raw_task["status"] = "running"
+    raw_run.update(sandbox_id="synthetic-sandbox", runtime_receipt={"container_id": "synthetic"})
     svc.store.put("durable_runs", run["id"], raw_run)
     svc.store.put("durable_tasks", task["id"], raw_task)
     with executor_lock(svc.store):

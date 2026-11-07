@@ -1,5 +1,7 @@
 """Synthetic, focused regressions from the independent exact-head review."""
 import asyncio
+import io
+import tarfile
 from unittest.mock import patch
 
 import pytest
@@ -13,6 +15,16 @@ from chattask.service import TaskService
 from types import SimpleNamespace
 
 LEGACY = b'''<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/abs/astro-ph/0701001</id><title>Legacy paper</title><updated>2007-01-01T00:00:00Z</updated><summary>Legacy abstract.</summary></entry></feed>'''
+
+
+def archive(*entries):
+    body = io.BytesIO()
+    with tarfile.open(fileobj=body, mode='w:gz') as tar:
+        for name, data in entries:
+            item = tarfile.TarInfo(name)
+            item.size = len(data)
+            tar.addfile(item, io.BytesIO(data))
+    return body.getvalue()
 
 
 def service(tmp_path):
@@ -227,6 +239,160 @@ def test_gateway_lease_closes_before_or_after_sandbox_receipt_failure(monkeypatc
         assert result['cleanup'] == {'container_absent':False,'creation_outcome_unknown':True}
     else:
         assert result['cleanup']['container_absent'] is True
+
+
+class CompletingExecutor:
+    images = {'python': 'synthetic'}
+
+    def __init__(self):
+        self.calls = []
+
+    async def execute_durable(self, task, run, checkpoint, save_checkpoint, progress):
+        self.calls.append(run['id'])
+        await save_checkpoint(archive(('work/example.txt', b'state'),
+                                      ('codex-home/sessions/session.jsonl', b'turn')), 'session-1')
+        return {'ok': True, 'native_turn_completed': True, 'final': 'done',
+                'artifacts': [{'name': 'result.md', 'data': b'done'}],
+                'cleanup': {'container_absent': True},
+                'credential_closure': {'closed': True}}
+
+
+def test_worker_repairs_claim_crash_between_task_and_run_writes(tmp_path):
+    executor = CompletingExecutor()
+    svc = DurableTaskService(TaskStore(tmp_path / 'state'), executor)
+    task = created_like(svc, 'crash-claim')
+    run = svc.runs('alice', task['id'])[0]
+    original_put = svc.store.put
+
+    def fail_after_task_claim(collection, ident, value):
+        result = original_put(collection, ident, value)
+        if collection == 'durable_tasks' and value.get('status') == 'running':
+            raise OSError('synthetic crash after Task claim write')
+        return result
+
+    svc.store.put = fail_after_task_claim
+    with pytest.raises(OSError):
+        with executor_lock(svc.store):
+            asyncio.run(svc.worker_once())
+    assert svc.store.get('durable_tasks', task['id'])['status'] == 'running'
+    assert svc.store.get('durable_runs', run['id'])['status'] == 'queued'
+
+    svc.store.put = original_put
+    with executor_lock(svc.store):
+        recovered = asyncio.run(svc.worker_once())
+    assert recovered['status'] == 'completed'
+    assert executor.calls == [run['id']]
+    assert svc.get('alice', task['id'])['status'] == 'waiting_input'
+
+
+def test_worker_repairs_completion_crash_between_run_and_task_writes(tmp_path):
+    first_executor = CompletingExecutor()
+    store = TaskStore(tmp_path / 'state')
+    svc = DurableTaskService(store, first_executor)
+    task = created_like(svc, 'crash-complete')
+    run_id = svc.runs('alice', task['id'])[0]['id']
+    original_put = store.put
+
+    def fail_after_terminal_run(collection, ident, value):
+        result = original_put(collection, ident, value)
+        if collection == 'durable_runs' and value.get('status') == 'completed':
+            raise OSError('synthetic crash after terminal Run write')
+        return result
+
+    store.put = fail_after_terminal_run
+    with pytest.raises(OSError):
+        with executor_lock(store):
+            asyncio.run(svc.worker_once())
+    assert store.get('durable_runs', run_id)['status'] == 'completed'
+    assert store.get('durable_tasks', task['id'])['status'] == 'running'
+
+    second_executor = CompletingExecutor()
+    recovered_service = DurableTaskService(store, second_executor)
+    with executor_lock(store):
+        result = asyncio.run(recovered_service.worker_once())
+    assert result is None
+    assert second_executor.calls == []
+    assert store.get('durable_tasks', task['id'])['status'] == 'waiting_input'
+
+
+def test_worker_restores_missing_auto_initial_run_without_client_retry(tmp_path, monkeypatch):
+    async def inline(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+    monkeypatch.setattr(asyncio, 'to_thread', inline)
+    executor = CompletingExecutor()
+    svc = DurableTaskService(TaskStore(tmp_path / 'state'), executor,
+                             image_profiles={'python': 'synthetic'}, research_enabled=True)
+    records = [{'id': 'paper-1', 'url': 'https://arxiv.org/abs/2601.01234',
+                'title': 'Paper', 'content': 'Abstract'}]
+    with patch('chattask.research_discovery.discover_arxiv', return_value=records):
+        task = asyncio.run(svc.create_auto_research('alice', body()))
+    run_id = svc.runs('alice', task['id'])[0]['id']
+    (svc.store.root / 'durable_runs' / f'{run_id}.json').unlink()
+    assert svc.runs('alice', task['id']) == []
+
+    with executor_lock(svc.store):
+        result = asyncio.run(svc.worker_once())
+    assert result['id'] == run_id
+    assert executor.calls == [run_id]
+    assert svc.runs('alice', task['id'])[0]['source_records'] == records
+
+
+def test_pre_execution_checkpoint_failure_blocks_one_run_without_fencing_queue(tmp_path):
+    executor = CompletingExecutor()
+    svc = DurableTaskService(TaskStore(tmp_path / 'state'), executor)
+    first = created_like(svc, 'bad-checkpoint')
+    second = created_like(svc, 'healthy-run')
+    first_run = svc.runs('alice', first['id'])[0]
+    raw_task = svc.store.get('durable_tasks', first['id'])
+    raw_task['checkpoint'] = {'name': 'checkpoint.tar.gz', 'size': 1,
+                              'sha256': '0' * 64, 'run_id': first_run['id'],
+                              'session_id': 'missing-session'}
+    svc.store.put('durable_tasks', first['id'], raw_task)
+
+    with executor_lock(svc.store):
+        blocked = asyncio.run(svc.worker_once())
+    assert blocked['id'] == first_run['id']
+    assert blocked['status'] == 'blocked'
+    assert svc.store.get('durable_runs', first_run['id'])['reconciliation_required'] is False
+    assert executor.calls == []
+
+    with executor_lock(svc.store):
+        healthy = asyncio.run(svc.worker_once())
+    assert healthy['id'] != first_run['id']
+    assert healthy['status'] == 'completed'
+    assert executor.calls == [healthy['id']]
+    assert svc.get('alice', second['id'])['status'] == 'waiting_input'
+
+
+def test_worker_restart_before_execution_blocks_without_resource_fence(tmp_path):
+    executor = CompletingExecutor()
+    svc = DurableTaskService(TaskStore(tmp_path / 'state'), executor)
+    first = created_like(svc, 'claimed-but-not-started')
+    second = created_like(svc, 'next-queued')
+    first_run = svc.runs('alice', first['id'])[0]
+    raw_run = svc.store.get('durable_runs', first_run['id'])
+    raw_task = svc.store.get('durable_tasks', first['id'])
+    raw_run.update(status='running', generation=1)
+    raw_task.update(status='running', generation=1)
+    svc.store.put('durable_runs', first_run['id'], raw_run)
+    svc.store.put('durable_tasks', first['id'], raw_task)
+
+    with executor_lock(svc.store):
+        recovered = asyncio.run(svc.worker_once())
+    blocked_run = svc.store.get('durable_runs', first_run['id'])
+    assert recovered['id'] != first_run['id']
+    assert blocked_run['status'] == 'blocked'
+    assert blocked_run['reconciliation_required'] is False
+    assert blocked_run['cleanup'] == {'not_created': True}
+    assert svc.get('alice', first['id'])['status'] == 'blocked'
+    assert executor.calls == [recovered['id']]
+    assert svc.get('alice', second['id'])['status'] == 'waiting_input'
+
+
+def created_like(svc, request_id):
+    return svc.create('alice', {'request_id': request_id,
+                                'instructions': f'task {request_id}',
+                                'image_profile': 'python'})
 
 
 def test_restart_fences_ambiguous_intent_then_runs_other_queued_task(tmp_path):

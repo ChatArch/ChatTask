@@ -388,27 +388,86 @@ class DurableTaskService:
                 self.store.put('durable_tasks', task['id'], current)
                 return self._public_run(record)
 
+    @staticmethod
+    def _terminal_task_status(run, task):
+        if run['status'] == 'completed':
+            return ('paused' if task.get('pause_requested') else 'waiting_input')
+        if run['status'] == 'paused':
+            return 'paused'
+        return 'blocked'
+
+    def _recover_durable_state(self):
+        """Repair bounded Task/Run write boundaries without replaying an execution."""
+        tasks = {item['id']: item for item in self.store.list('durable_tasks')}
+        runs = self.store.list('durable_runs')
+        for run in runs:
+            task = tasks.get(run['task_id'])
+            if task is None or task.get('latest_run_id') != run['id']:
+                continue
+            changed = False
+            if task.get('status') == 'running' and run.get('status') == 'queued':
+                # The claim's Task write survived but the Run write did not. No
+                # executor call has started for a Run that remains queued.
+                task.update(status='queued', generation=0, updated_at=now())
+                run.update(status='queued', generation=0, updated_at=now())
+                changed = True
+            elif task.get('status') == 'running' and run.get('status') in (
+                    'completed', 'blocked', 'interrupted', 'paused'):
+                task.update(status=self._terminal_task_status(run, task),
+                            pause_requested=False, updated_at=now())
+                self.store.put('durable_tasks', task['id'], task)
+                continue
+            if changed:
+                self.store.put('durable_runs', run['id'], run)
+                self.store.put('durable_tasks', task['id'], task)
+
+        for task in tasks.values():
+            run_id = task.get('latest_run_id')
+            if (task.get('status') == 'queued' and task.get('auto_initial_run')
+                    and task['auto_initial_run'].get('id') == run_id):
+                try:
+                    self.store.get('durable_runs', run_id)
+                except FileNotFoundError:
+                    run = task['auto_initial_run']
+                    self.store.put('durable_runs', run_id, run)
+
     async def worker_once(self):
         """Claim at most one round. The caller must hold executor_lock."""
         if self.executor is None:
             raise RuntimeError("configured durable executor required")
         with self.store.locked():
+            self._recover_durable_state()
+        with self.store.locked():
             for run in self.store.list("durable_runs"):
                 if run["status"] in ('running', 'reconcile_running'):
-                    if run.get("sandbox_id") and run.get("runtime_receipt") and hasattr(self.executor, "task_service"):
-                        try:
-                            actual = self.executor.task_service.inspect_owned(run["sandbox_id"])
-                            run["sandbox_reconciliation"] = "owned_present" if actual == run["runtime_receipt"] else "receipt_mismatch"
-                        except Exception:
-                            run["sandbox_reconciliation"] = "unverified"
-                    run.update(status="interrupted", unknown_side_effects=True,
-                               error="WorkerExitedDuringRound", reconciliation_required=True,
-                               research_outcome_unknown=run.get('research_outcome_unknown', False) or run.get('phase') == 'research_publish_started' or run['status'] == 'reconcile_running',
-                               updated_at=now())
-                    self.store.put("durable_runs", run["id"], run)
-                    task = self.store.get("durable_tasks", run["task_id"])
-                    task.update(status="blocked", updated_at=now(), generation=task["generation"] + 1)
-                    self.store.put("durable_tasks", task["id"], task)
+                    has_runtime_evidence = bool(run.get('sandbox_id') or run.get('runtime_receipt') or run.get('phase'))
+                    if run["status"] == 'reconcile_running' or has_runtime_evidence:
+                        if run.get("sandbox_id") and run.get("runtime_receipt") and hasattr(self.executor, "task_service"):
+                            try:
+                                actual = self.executor.task_service.inspect_owned(run["sandbox_id"])
+                                run["sandbox_reconciliation"] = "owned_present" if actual == run["runtime_receipt"] else "receipt_mismatch"
+                            except Exception:
+                                run["sandbox_reconciliation"] = "unverified"
+                        run.update(status="interrupted", unknown_side_effects=True,
+                                   error="WorkerExitedDuringRound", reconciliation_required=True,
+                                   research_outcome_unknown=run.get('research_outcome_unknown', False) or run.get('phase') == 'research_publish_started' or run['status'] == 'reconcile_running',
+                                   updated_at=now())
+                        self.store.put("durable_runs", run["id"], run)
+                        task = self.store.get("durable_tasks", run["task_id"])
+                        task.update(status="blocked", updated_at=now(), generation=task["generation"] + 1)
+                        self.store.put("durable_tasks", task["id"], task)
+                    else:
+                        run.update(status="blocked", unknown_side_effects=False,
+                                   error="WorkerExitedBeforeRuntimeCreation",
+                                   reconciliation_required=False,
+                                   cleanup={"not_created": True},
+                                   credential_closure={"not_created": True},
+                                   updated_at=now())
+                        self.store.put("durable_runs", run["id"], run)
+                        task = self.store.get("durable_tasks", run["task_id"])
+                        task.update(status="blocked", pause_requested=False,
+                                    updated_at=now(), generation=task["generation"] + 1)
+                        self.store.put("durable_tasks", task["id"], task)
         unresolved = [r for r in self.store.list('durable_runs') if r.get('reconciliation_required')]
         for old in unresolved:
             reconcile = getattr(self.executor, 'reconcile_durable', None)
@@ -491,11 +550,33 @@ class DurableTaskService:
                 self.store.put("durable_runs", run["id"], current_run)
                 self.store.put("durable_tasks", task["id"], current)
 
+        pre_execution_error = None
         try:
             if task.get("checkpoint"):
                 ref = task["checkpoint"]
                 checkpoint = self.store.artifact(ref["run_id"], "checkpoint.tar.gz")
                 validate_checkpoint(checkpoint, expected=ref, session_id=ref["session_id"])
+        except Exception as exc:
+            pre_execution_error = exc
+
+        if pre_execution_error is not None:
+            with self.store.locked():
+                current = self.store.get("durable_tasks", task["id"])
+                current_run = self.store.get("durable_runs", run["id"])
+                if current["generation"] != generation or current_run["generation"] != generation:
+                    raise DurableConflict("stale executor generation")
+                current_run.update(status="blocked", error=type(pre_execution_error).__name__,
+                                    cleanup={"not_created": True},
+                                    credential_closure={"not_created": True},
+                                    unknown_side_effects=False,
+                                    research_outcome_unknown=False,
+                                    reconciliation_required=False, updated_at=now())
+                current.update(status="blocked", pause_requested=False, updated_at=now())
+                self.store.put("durable_runs", run["id"], current_run)
+                self.store.put("durable_tasks", task["id"], current)
+                return self._public_run(current_run)
+
+        try:
             result = await self.executor.execute_durable(task, run, checkpoint, save_checkpoint, progress)
         except Exception as exc:
             result = {"ok": False, "error": type(exc).__name__, "artifacts": [],

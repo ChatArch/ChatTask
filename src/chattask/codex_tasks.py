@@ -308,6 +308,9 @@ class CodexTaskExecutor:
                 outcome['ok']=True
             except Exception as exc:
                 outcome['error']=runtime.redact(str(exc))[:1800]
+                if durable and not gateway_intent and lease is None and sandbox is None:
+                    outcome['cleanup']={'not_created':True,'container_absent':True}
+                    outcome['credential_closure']={'not_created':True}
                 if durable and model_quiescent and sandbox is not None and not outcome.get('codex_session_id'):
                     try:
                         partial=await sandbox.files.read_file('/workspace/agent-events.jsonl')

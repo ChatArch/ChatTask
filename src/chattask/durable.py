@@ -260,7 +260,9 @@ class DurableTaskService:
             elif action == "pause":
                 if task["status"] == "queued":
                     run = self.store.get("durable_runs", task["latest_run_id"])
-                    run.update(status="paused", updated_at=now())
+                    run.update(status="paused", updated_at=now(),
+                               pause_control={"request_id": request_id, "fingerprint": fingerprint,
+                                              "actor": actor})
                     self.store.put("durable_runs", run["id"], run)
                     task["status"] = "paused"
                 elif task["status"] == "running":
@@ -411,10 +413,28 @@ class DurableTaskService:
                 task.update(status='queued', generation=0, updated_at=now())
                 run.update(status='queued', generation=0, updated_at=now())
                 changed = True
-            elif task.get('status') == 'running' and run.get('status') in (
+            elif task.get('status') == 'queued' and run.get('status') == 'paused' and run.get('pause_control'):
+                pause = run['pause_control']
+                if (isinstance(pause, dict) and isinstance(pause.get('request_id'), str)
+                        and _REQUEST.fullmatch(pause['request_id'])
+                        and isinstance(pause.get('fingerprint'), str)
+                        and (pause.get('actor') == task['owner']
+                             or task.get('members', {}).get(pause.get('actor')) == 'editor')):
+                    task['controls'][pause['request_id']] = {
+                        'fingerprint': pause['fingerprint'], 'action': 'pause', 'actor': pause['actor']}
+                    task.update(status='paused', updated_at=now())
+                    self.store.put('durable_tasks', task['id'], task)
+                continue
+            elif task.get('status') in ('running', 'reconciling') and run.get('status') in (
                     'completed', 'blocked', 'interrupted', 'paused'):
                 task.update(status=self._terminal_task_status(run, task),
                             pause_requested=False, updated_at=now())
+                receipt = run.get('research_receipt') if run['status'] == 'completed' and task.get('workflow') == 'research' else None
+                if isinstance(receipt, dict) and all(isinstance(receipt.get(key), str) and re.fullmatch(r'[a-f0-9]{24}', receipt[key])
+                                                      for key in ('root_doc_id', 'project_id')):
+                    task['research_root_doc_id'] = receipt['root_doc_id']
+                    if self.research_origin:
+                        task['research_project_url'] = self.research_origin + '/project/' + receipt['project_id']
                 self.store.put('durable_tasks', task['id'], task)
                 continue
             if changed:
@@ -480,6 +500,24 @@ class DurableTaskService:
                     fresh['sandbox_reconciliation'] = 'container_absent_and_lease_closed'
                     fresh['updated_at'] = now()
                     self.store.put('durable_runs', fresh['id'], fresh)
+        with self.store.locked():
+            for task in self.store.list('durable_tasks'):
+                run = self.store.get('durable_runs', task['latest_run_id'])
+                ref = run.get('checkpoint')
+                if (run['task_id'] != task['id'] or run.get('reconciliation_required')
+                        or run['status'] not in ('completed', 'blocked', 'interrupted', 'paused')
+                        or not isinstance(ref, dict) or task.get('checkpoint') == ref):
+                    continue
+                try:
+                    if ref.get('run_id') != run['id'] or ref.get('session_id') != run.get('session_id'):
+                        raise ValueError('checkpoint pointer identity mismatch')
+                    data = self.store.artifact(run['id'], 'checkpoint.tar.gz')
+                    validate_checkpoint(data, expected=ref, session_id=ref['session_id'])
+                except (ValueError, KeyError, FileNotFoundError):
+                    continue
+                task['checkpoint'] = ref
+                task['updated_at'] = now()
+                self.store.put('durable_tasks', task['id'], task)
         with self.store.locked():
             reconcile_queue = sorted((r for r in self.store.list('durable_runs') if r['status'] == 'reconcile_queued'),
                                      key=lambda r: r['updated_at'])
@@ -579,8 +617,11 @@ class DurableTaskService:
         try:
             result = await self.executor.execute_durable(task, run, checkpoint, save_checkpoint, progress)
         except Exception as exc:
+            recorded = self.store.get('durable_runs', run['id'])
+            not_created = not any(recorded.get(key) for key in ('phase', 'sandbox_id', 'runtime_receipt'))
             result = {"ok": False, "error": type(exc).__name__, "artifacts": [],
-                      "cleanup": {"container_absent": False}, "credential_closure": {"closed": False}}
+                      "cleanup": ({"container_absent": True, "not_created": True} if not_created else {"container_absent": False}),
+                      "credential_closure": ({"not_created": True} if not_created else {"closed": False})}
 
         def persist_artifacts(items):
             with self.store.locked():
@@ -649,7 +690,8 @@ class DurableTaskService:
                                unknown_side_effects=research_unknown or not success and bool(current_run.get("sandbox_id") or result.get("codex_session_id")),
                                research_outcome_unknown=research_unknown,
                                reconciliation_required=not result.get('cleanup', {}).get('container_absent', False)
-                               or not result.get('credential_closure', {}).get('closed', False),
+                               or not (result.get('credential_closure', {}).get('closed', False)
+                                       or result.get('credential_closure', {}).get('not_created', False)),
                                updated_at=now())
             if research_receipt is not None:
                 current_run['research_receipt'] = research_receipt

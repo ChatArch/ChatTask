@@ -12,6 +12,7 @@ from chattask.research_discovery import discover_arxiv
 from chattask.codex_tasks import CodexRuntime, CodexTaskExecutor
 from chattask.settings import TaskSettings
 from chattask.service import TaskService
+from chattask.research import ResearchResult, ResearchConflict
 from types import SimpleNamespace
 
 LEGACY = b'''<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/abs/astro-ph/0701001</id><title>Legacy paper</title><updated>2007-01-01T00:00:00Z</updated><summary>Legacy abstract.</summary></entry></feed>'''
@@ -425,3 +426,208 @@ def test_restart_fences_ambiguous_intent_then_runs_other_queued_task(tmp_path):
         asyncio.run(svc.worker_once())
     assert executor.executed == [svc.runs('owner', second['id'])[0]['id']]
     assert svc.runs('owner', first['id'])[0]['status'] == 'interrupted'
+
+
+def test_failed_first_progress_write_does_not_fence_next_task(tmp_path):
+    class ProgressExecutor(CompletingExecutor):
+        async def execute_durable(self, task, run, checkpoint, save, progress):
+            self.calls.append(run['id'])
+            await progress({'phase':'gateway_intent'})
+            return {'ok':False,'artifacts':[], 'cleanup':{'not_created':True},
+                    'credential_closure':{'not_created':True}}
+    executor = ProgressExecutor()
+    svc = DurableTaskService(TaskStore(tmp_path/'state'), executor)
+    first, second = created_like(svc, 'progress-fails'), created_like(svc, 'next')
+    first_run = svc.runs('alice', first['id'])[0]['id']
+    original = svc.store.put
+    def fail_first_intent(collection, ident, value):
+        if collection == 'durable_runs' and ident == first_run and value.get('phase') == 'gateway_intent':
+            raise OSError('synthetic pre-resource write failure')
+        return original(collection, ident, value)
+    svc.store.put = fail_first_intent
+    with executor_lock(svc.store):
+        failed = asyncio.run(svc.worker_once())
+    assert failed['status'] == 'blocked'
+    raw = svc.store.get('durable_runs', first_run)
+    assert raw['reconciliation_required'] is False
+    assert raw['cleanup']['not_created'] is True
+    assert raw['credential_closure']['not_created'] is True
+    svc.store.put = original
+    with executor_lock(svc.store):
+        next_run = asyncio.run(svc.worker_once())
+    assert next_run['task_id'] == second['id']
+
+
+def test_executor_progress_failure_before_gateway_call_reports_no_resources():
+    class Gateway:
+        def __init__(self): self.calls = []
+        def create(self, *args): self.calls.append('create'); raise AssertionError('must not create')
+        def close(self, *args): self.calls.append('close'); raise AssertionError('must not close')
+    gateway = Gateway()
+    parent = SimpleNamespace(lock=asyncio.Lock(), settings=TaskSettings('http://127.0.0.1:1234','synthetic'), docker=None)
+    executor = CodexTaskExecutor(parent, CodexRuntime('http://127.0.0.1:8001/v1','synthetic-token',images={'python':'synthetic'}), gateway=gateway)
+    async def fail_progress(step):
+        if step.get('phase') == 'gateway_intent': raise OSError('synthetic state write failed')
+    result = asyncio.run(executor.execute_durable({'goal':'synthetic','image_profile':'python'},
+                         {'id':'a'*32,'instructions':'synthetic','workflow':'development','session_id':None},
+                         None, lambda *args: None, fail_progress))
+    assert gateway.calls == []
+    assert result['cleanup']['not_created'] is True
+    assert result['credential_closure'] == {'not_created':True}
+
+
+def test_executor_sandbox_intent_write_failure_without_gateway_reports_no_resources():
+    parent = SimpleNamespace(lock=asyncio.Lock(), settings=TaskSettings('http://127.0.0.1:1234','synthetic'), docker=None)
+    executor = CodexTaskExecutor(parent, CodexRuntime('http://127.0.0.1:8001/v1','synthetic-token',images={'python':'synthetic'}))
+    async def fail_progress(step):
+        if step.get('phase') == 'sandbox_intent': raise OSError('synthetic state write failed')
+    class Service:
+        async def create(self, **kwargs): raise AssertionError('must not create Sandbox')
+    with patch('chattask.codex_tasks.TaskService', return_value=Service()):
+        result = asyncio.run(executor.execute_durable({'goal':'synthetic','image_profile':'python'},
+                             {'id':'a'*32,'instructions':'synthetic','workflow':'development','session_id':None},
+                             None, lambda *args: None, fail_progress))
+    assert result['cleanup']['not_created'] is True
+    assert result['credential_closure'] == {'not_created':True}
+
+
+@pytest.mark.parametrize('succeeds', [True, False])
+def test_research_reconciliation_terminal_run_repairs_task_without_republish(tmp_path, succeeds):
+    class Publisher:
+        def __init__(self): self.calls = []
+        async def apublish(self, task_id, run_id, files, request_id, root):
+            self.calls.append((run_id, root))
+            if not succeeds: raise ResearchConflict('synthetic conflict')
+            return ResearchResult({'root_doc_id':'b'*24,'project_id':'c'*24}, b'%PDF-synthetic', b'PK-synthetic')
+    publisher = Publisher()
+    store = TaskStore(tmp_path/'state')
+    svc = DurableTaskService(store, CompletingExecutor(), research_publisher=publisher,
+                             research_origin='https://overleaf.example')
+    sources = [{'id':'paper-1','url':'https://example.org/paper','title':'Paper','content':'Excerpt'}]
+    task = svc.create('alice', {'request_id':'research','instructions':'Research recovery',
+                                'image_profile':'python','workflow':'research','source_records':sources})
+    run = svc.runs('alice', task['id'])[0]
+    raw_run, raw_task = store.get('durable_runs',run['id']), store.get('durable_tasks',task['id'])
+    raw_run.update(status='reconcile_running', generation=1, research_outcome_unknown=True)
+    raw_task.update(status='reconciling', generation=1)
+    data = b'{"main.tex":"synthetic"}'
+    import hashlib
+    store.put_artifact(run['id'], 'research-input.json', data)
+    raw_run['artifacts'].append({'name':'research-input.json','size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+    store.put('durable_runs',run['id'],raw_run); store.put('durable_tasks',task['id'],raw_task)
+    original = store.put
+    terminal = 'completed' if succeeds else 'blocked'
+    def crash_after_run(collection, ident, value):
+        result = original(collection, ident, value)
+        if collection == 'durable_runs' and ident == run['id'] and value.get('status') == terminal:
+            raise SystemExit('synthetic crash after terminal Run write')
+        return result
+    store.put = crash_after_run
+    with pytest.raises(SystemExit):
+        asyncio.run(svc._reconcile_research_run(raw_task, raw_run, 1))
+    store.put = original
+    assert store.get('durable_tasks',task['id'])['status'] == 'reconciling'
+    recovered = DurableTaskService(store, CompletingExecutor(), research_publisher=publisher,
+                                   research_origin='https://overleaf.example')
+    with executor_lock(store): assert asyncio.run(recovered.worker_once()) is None
+    assert store.get('durable_tasks',task['id'])['status'] == ('waiting_input' if succeeds else 'blocked')
+    assert len(publisher.calls) == 1
+    assert store.get('durable_runs',run['id'])['status'] == terminal
+
+
+def test_terminal_research_repair_restores_latest_root_before_next_resume(tmp_path):
+    store = TaskStore(tmp_path/'state')
+    svc = DurableTaskService(store, CompletingExecutor(), research_enabled=True,
+                             research_origin='https://overleaf.example')
+    sources = [{'id':'paper-1','url':'https://example.org/paper','title':'Paper','content':'Excerpt'}]
+    task = svc.create('alice', {'request_id':'research','instructions':'Research recovery',
+                                'image_profile':'python','workflow':'research','source_records':sources})
+    run = svc.runs('alice',task['id'])[0]
+    raw_run, raw_task = store.get('durable_runs',run['id']), store.get('durable_tasks',task['id'])
+    import hashlib
+    checkpoint = archive(('work/example.txt',b'state'),('codex-home/sessions/rollout-session-1.jsonl',b'turn'))
+    ref = {'name':'checkpoint.tar.gz','size':len(checkpoint),'sha256':hashlib.sha256(checkpoint).hexdigest(),
+           'run_id':run['id'],'session_id':'session-1'}
+    store.put_artifact(run['id'],'checkpoint.tar.gz',checkpoint)
+    raw_run.update(status='completed', number=2, session_id='session-1', checkpoint=ref,
+                   research_receipt={'root_doc_id':'b'*24,'project_id':'c'*24})
+    raw_task.update(status='running',research_root_doc_id='a'*24,
+                    research_project_url='https://overleaf.example/project/'+'d'*24,
+                    checkpoint=ref)
+    store.put('durable_runs',run['id'],raw_run); store.put('durable_tasks',task['id'],raw_task)
+    with executor_lock(store): assert asyncio.run(svc.worker_once()) is None
+    repaired = store.get('durable_tasks',task['id'])
+    assert repaired['research_root_doc_id'] == 'b'*24
+    assert repaired['research_project_url'] == 'https://overleaf.example/project/'+'c'*24
+    queued = svc.resume('alice',task['id'],{'request_id':'next-round','instructions':'Continue research'})
+    assert queued['status'] == 'queued'
+    next_run = svc.runs('alice',task['id'])[-1]
+    assert next_run['number'] == 3 and next_run['session_id'] == 'session-1'
+    class Publisher:
+        def __init__(self): self.roots = []
+        async def apublish(self, task_id, run_id, files, request_id, root):
+            self.roots.append(root)
+            return ResearchResult({'root_doc_id':'e'*24,'project_id':'c'*24}, b'%PDF-synthetic', b'PK-synthetic')
+    publisher = Publisher()
+    svc.research_publisher = publisher
+    raw_next = store.get('durable_runs',next_run['id'])
+    raw_next.update(status='reconcile_running', generation=1)
+    current = store.get('durable_tasks',task['id'])
+    current.update(status='reconciling', generation=1)
+    data = b'{"main.tex":"synthetic"}'
+    store.put_artifact(next_run['id'],'research-input.json',data)
+    raw_next['artifacts'].append({'name':'research-input.json','size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+    store.put('durable_runs',next_run['id'],raw_next); store.put('durable_tasks',task['id'],current)
+    asyncio.run(svc._reconcile_research_run(current,raw_next,1))
+    assert publisher.roots == ['b'*24]
+
+
+def test_queued_pause_run_write_crash_repairs_task_and_request_id(tmp_path):
+    svc = DurableTaskService(TaskStore(tmp_path/'state'), CompletingExecutor())
+    task = created_like(svc, 'pause-crash')
+    run = svc.runs('alice',task['id'])[0]
+    original = svc.store.put
+    def crash_after_pause(collection, ident, value):
+        result = original(collection, ident, value)
+        if collection == 'durable_runs' and ident == run['id'] and value.get('status') == 'paused':
+            raise SystemExit('synthetic crash after paused Run write')
+        return result
+    svc.store.put = crash_after_pause
+    with pytest.raises(SystemExit): svc.pause('alice',task['id'],{'request_id':'pause-1'})
+    svc.store.put = original
+    with executor_lock(svc.store): assert asyncio.run(svc.worker_once()) is None
+    assert svc.get('alice',task['id'])['status'] == 'paused'
+    assert svc.pause('alice',task['id'],{'request_id':'pause-1'})['status'] == 'paused'
+    assert svc.resume('alice',task['id'],{'request_id':'resume-1','instructions':'continue'})['status'] == 'queued'
+
+
+def test_latest_interrupted_run_repairs_verified_checkpoint_pointer_after_reconciliation(tmp_path):
+    class CheckpointExecutor(CompletingExecutor):
+        async def reconcile_durable(self, run): return True
+        async def execute_durable(self, task, run, checkpoint, save, progress):
+            await progress({'phase':'sandbox_created','sandbox_id':'synthetic-sandbox','runtime':{'synthetic':True}})
+            await save(archive(('work/example.txt',b'state'),('codex-home/sessions/rollout-session-1.jsonl',b'turn')), 'session-1')
+            raise AssertionError('synthetic crash should precede return')
+    svc = DurableTaskService(TaskStore(tmp_path/'state'), CheckpointExecutor())
+    task = created_like(svc, 'checkpoint-crash')
+    run = svc.runs('alice',task['id'])[0]
+    original = svc.store.put
+    def crash_after_run_checkpoint(collection, ident, value):
+        result = original(collection, ident, value)
+        if collection == 'durable_runs' and ident == run['id'] and value.get('checkpoint'):
+            raise SystemExit('synthetic crash after Run checkpoint write')
+        return result
+    svc.store.put = crash_after_run_checkpoint
+    with pytest.raises(SystemExit):
+        with executor_lock(svc.store): asyncio.run(svc.worker_once())
+    svc.store.put = original
+    with executor_lock(svc.store): assert asyncio.run(svc.worker_once()) is None
+    raw_run = svc.store.get('durable_runs',run['id'])
+    assert raw_run['status'] == 'interrupted'
+    assert raw_run['reconciliation_required'] is False
+    assert svc.get('alice',task['id'])['checkpoint'] == raw_run['checkpoint']
+    with pytest.raises(DurableConflict):
+        svc.resume('alice',task['id'],{'request_id':'resume-no-ack','instructions':'continue'})
+    resumed = svc.resume('alice',task['id'],{'request_id':'resume-ack','instructions':'continue','acknowledge_unknown':True})
+    assert resumed['status'] == 'queued'
+    assert svc.runs('alice',task['id'])[-1]['session_id'] == 'session-1'

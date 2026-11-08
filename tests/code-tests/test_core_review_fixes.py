@@ -631,3 +631,102 @@ def test_latest_interrupted_run_repairs_verified_checkpoint_pointer_after_reconc
     resumed = svc.resume('alice',task['id'],{'request_id':'resume-ack','instructions':'continue','acknowledge_unknown':True})
     assert resumed['status'] == 'queued'
     assert svc.runs('alice',task['id'])[-1]['session_id'] == 'session-1'
+
+
+def test_ordinary_create_run_write_crash_recovers_without_retry(tmp_path):
+    store = TaskStore(tmp_path/'state')
+    executor = CompletingExecutor()
+    svc = DurableTaskService(store, executor)
+    original = store.put
+    def crash_after_run(collection, ident, value):
+        result = original(collection, ident, value)
+        if collection == 'durable_runs' and value.get('request_id') == 'first':
+            raise SystemExit('synthetic crash after initial Run write')
+        return result
+    store.put = crash_after_run
+    with pytest.raises(SystemExit): created_like(svc, 'first')
+    store.put = original
+    assert len(store.list('durable_tasks')) == 1
+    second = created_like(svc, 'second')
+    with executor_lock(store):
+        result = asyncio.run(svc.worker_once())
+    assert result['status'] == 'completed'
+    assert store.get('durable_runs', store.list('durable_tasks')[0]['latest_run_id'])
+    with executor_lock(store): asyncio.run(svc.worker_once())
+    assert svc.get('alice', second['id'])['status'] == 'waiting_input'
+
+
+def test_preexisting_orphan_queued_run_does_not_stop_worker(tmp_path):
+    store = TaskStore(tmp_path/'state')
+    svc = DurableTaskService(store, CompletingExecutor())
+    healthy = created_like(svc, 'healthy')
+    orphan = store.get('durable_runs', healthy['latest_run_id']).copy()
+    orphan.update(id='a'*32, task_id='b'*32, created_at='0000')
+    store.put('durable_runs', orphan['id'], orphan)
+    with executor_lock(store): result = asyncio.run(svc.worker_once())
+    assert result['id'] == healthy['latest_run_id']
+    assert store.get('durable_runs', orphan['id'])['status'] == 'queued'
+
+
+def test_reconcile_run_write_crash_repairs_intent_and_later_queue(tmp_path):
+    store = TaskStore(tmp_path/'state')
+    svc = DurableTaskService(store, CompletingExecutor(), research_enabled=True)
+    sources = [{'id':'paper-1','url':'https://example.org/paper','title':'Paper','content':'Excerpt'}]
+    tasks = [svc.create('alice', {'request_id':f'research-{n}','instructions':'Research recovery',
+             'image_profile':'python','workflow':'research','source_records':sources}) for n in (1,2)]
+    import hashlib
+    for task in tasks:
+        run = store.get('durable_runs', task['latest_run_id'])
+        state = store.get('durable_tasks', task['id'])
+        data = b'{"main.tex":"synthetic"}'
+        store.put_artifact(run['id'], 'research-input.json', data)
+        run['artifacts'].append({'name':'research-input.json','size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+        run.update(status='blocked', research_outcome_unknown=True)
+        state['status'] = 'blocked'
+        store.put('durable_runs',run['id'],run); store.put('durable_tasks',task['id'],state)
+    original = store.put
+    def crash_after_queue(collection, ident, value):
+        result = original(collection, ident, value)
+        if collection == 'durable_runs' and ident == tasks[0]['latest_run_id'] and value.get('status') == 'reconcile_queued':
+            raise SystemExit('synthetic crash after reconcile Run write')
+        return result
+    store.put = crash_after_queue
+    with pytest.raises(SystemExit): svc.reconcile_research('alice',tasks[0]['id'],{'request_id':'retry-1','acknowledge_unknown':True})
+    store.put = original
+    svc.reconcile_research('alice',tasks[1]['id'],{'request_id':'retry-2','acknowledge_unknown':True})
+    recovered = DurableTaskService(store, CompletingExecutor(), research_enabled=True)
+    with store.locked(): recovered._recover_durable_state()
+    assert store.get('durable_tasks',tasks[0]['id'])['controls']['retry-1']['action'] == 'reconcile_research'
+    assert recovered.reconcile_research('alice',tasks[0]['id'],{'request_id':'retry-1','acknowledge_unknown':True})['id'] == tasks[0]['id']
+    # An older ineligible entry cannot starve a later eligible reconciliation.
+    first = store.get('durable_tasks', tasks[0]['id']); first['status'] = 'blocked'; store.put('durable_tasks',first['id'],first)
+    stale = store.get('durable_runs', tasks[0]['latest_run_id']); stale.pop('reconcile_control'); store.put('durable_runs',stale['id'],stale)
+    class Publisher:
+        def __init__(self): self.calls = []
+        async def apublish(self, task_id, run_id, files, request_id, root):
+            self.calls.append(run_id)
+            return ResearchResult({'root_doc_id':'b'*24,'project_id':'c'*24}, b'%PDF-synthetic', b'PK-synthetic')
+    publisher = Publisher()
+    recovered.research_publisher = publisher; recovered.research_origin = 'https://overleaf.example'
+    with executor_lock(store): result = asyncio.run(recovered.worker_once())
+    assert result['id'] == tasks[1]['latest_run_id']
+    assert publisher.calls == [tasks[1]['latest_run_id']]
+
+
+def test_research_url_backfills_after_origin_returns(tmp_path):
+    store = TaskStore(tmp_path/'state')
+    svc = DurableTaskService(store, CompletingExecutor(), research_enabled=True)
+    sources = [{'id':'paper-1','url':'https://example.org/paper','title':'Paper','content':'Excerpt'}]
+    task = svc.create('alice', {'request_id':'research-url','instructions':'Research recovery',
+                 'image_profile':'python','workflow':'research','source_records':sources})
+    run = store.get('durable_runs',task['latest_run_id'])
+    state = store.get('durable_tasks',task['id'])
+    run.update(status='completed', research_receipt={'root_doc_id':'b'*24,'project_id':'c'*24})
+    state.update(status='reconciling', research_root_doc_id='a'*24, research_project_url='https://old.example/project/'+'d'*24)
+    store.put('durable_runs',run['id'],run); store.put('durable_tasks',task['id'],state)
+    with executor_lock(store): assert asyncio.run(svc.worker_once()) is None
+    assert store.get('durable_tasks',task['id'])['research_root_doc_id'] == 'b'*24
+    configured = DurableTaskService(store, CompletingExecutor(), research_enabled=True,
+                                    research_origin='https://overleaf.example')
+    with executor_lock(store): assert asyncio.run(configured.worker_once()) is None
+    assert configured.get('alice',task['id'])['research_project_url'] == 'https://overleaf.example/project/'+'c'*24

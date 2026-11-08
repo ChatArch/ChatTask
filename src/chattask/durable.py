@@ -124,6 +124,11 @@ class DurableTaskService:
                                 old_run.setdefault('source_records', [])
                                 self.store.put('durable_runs', old_run['id'], old_run)
                         self.store.put('durable_tasks', prior['id'], prior)
+                    try:
+                        self.store.get('durable_runs', prior['latest_run_id'])
+                    except FileNotFoundError:
+                        if prior.get('initial_run'):
+                            self.store.put('durable_runs', prior['latest_run_id'], prior['initial_run'])
                     return self._public_task(prior)
             task_id, run_id = uuid.uuid4().hex, uuid.uuid4().hex
             stamp = now()
@@ -142,11 +147,9 @@ class DurableTaskService:
             if _auto_discovery is not None:
                 task['auto_discovery'] = _auto_discovery
                 task['auto_initial_run'] = run
-                self.store.put("durable_tasks", task_id, task)
-                self.store.put("durable_runs", run_id, run)
-            else:
-                self.store.put("durable_runs", run_id, run)
-                self.store.put("durable_tasks", task_id, task)
+            task['initial_run'] = run
+            self.store.put("durable_tasks", task_id, task)
+            self.store.put("durable_runs", run_id, run)
             return self._public_task(task)
 
     async def create_auto_research(self, actor, body):
@@ -308,6 +311,8 @@ class DurableTaskService:
             if not any(item['name'] == 'research-input.json' for item in run['artifacts']):
                 raise DurableConflict('research input evidence missing')
             run.update(status='reconcile_queued', updated_at=now())
+            run['reconcile_control'] = {'request_id': request_id, 'fingerprint': fingerprint,
+                                        'action': 'reconcile_research', 'actor': actor}
             task.update(status='reconciling', updated_at=now())
             task['controls'][request_id] = {'fingerprint': fingerprint, 'action': 'reconcile_research', 'actor': actor}
             self.store.put('durable_runs', run['id'], run)
@@ -407,6 +412,20 @@ class DurableTaskService:
             if task is None or task.get('latest_run_id') != run['id']:
                 continue
             changed = False
+            if task.get('status') == 'blocked' and run.get('status') == 'reconcile_queued':
+                intent = run.get('reconcile_control')
+                if (isinstance(intent, dict) and isinstance(intent.get('request_id'), str)
+                        and _REQUEST.fullmatch(intent['request_id'])
+                        and isinstance(intent.get('fingerprint'), str)
+                        and intent.get('action') == 'reconcile_research'
+                        and (intent.get('actor') == task['owner']
+                             or task.get('members', {}).get(intent.get('actor')) == 'editor')):
+                    previous = task['controls'].get(intent['request_id'])
+                    if previous is None or previous == {key: intent[key] for key in ('fingerprint', 'action', 'actor')}:
+                        task['controls'][intent['request_id']] = {key: intent[key] for key in ('fingerprint', 'action', 'actor')}
+                        task.update(status='reconciling', updated_at=now())
+                        self.store.put('durable_tasks', task['id'], task)
+                continue
             if task.get('status') == 'running' and run.get('status') == 'queued':
                 # The claim's Task write survived but the Run write did not. No
                 # executor call has started for a Run that remains queued.
@@ -443,13 +462,26 @@ class DurableTaskService:
 
         for task in tasks.values():
             run_id = task.get('latest_run_id')
-            if (task.get('status') == 'queued' and task.get('auto_initial_run')
-                    and task['auto_initial_run'].get('id') == run_id):
+            initial = task.get('initial_run') or task.get('auto_initial_run')
+            if (task.get('status') == 'queued' and initial
+                    and initial.get('id') == run_id):
                 try:
                     self.store.get('durable_runs', run_id)
                 except FileNotFoundError:
-                    run = task['auto_initial_run']
-                    self.store.put('durable_runs', run_id, run)
+                    self.store.put('durable_runs', run_id, initial)
+            if task.get('workflow') == 'research' and self.research_origin and run_id:
+                try:
+                    latest = self.store.get('durable_runs', run_id)
+                except FileNotFoundError:
+                    continue
+                receipt = latest.get('research_receipt') if latest.get('status') == 'completed' else None
+                if (isinstance(receipt, dict) and all(isinstance(receipt.get(key), str)
+                        and re.fullmatch(r'[a-f0-9]{24}', receipt[key]) for key in ('root_doc_id', 'project_id'))):
+                    url = self.research_origin + '/project/' + receipt['project_id']
+                    if task.get('research_root_doc_id') != receipt['root_doc_id'] or task.get('research_project_url') != url:
+                        task.update(research_root_doc_id=receipt['root_doc_id'], research_project_url=url,
+                                    updated_at=now())
+                        self.store.put('durable_tasks', task['id'], task)
 
     async def worker_once(self):
         """Claim at most one round. The caller must hold executor_lock."""
@@ -521,27 +553,31 @@ class DurableTaskService:
         with self.store.locked():
             reconcile_queue = sorted((r for r in self.store.list('durable_runs') if r['status'] == 'reconcile_queued'),
                                      key=lambda r: r['updated_at'])
-            if reconcile_queue:
-                run = reconcile_queue[0]
-                task = self.store.get('durable_tasks', run['task_id'])
-                if task['status'] == 'reconciling' and task['latest_run_id'] == run['id']:
-                    task['generation'] += 1
-                    generation = task['generation']
-                    run.update(status='reconcile_running', generation=generation, updated_at=now())
-                    self.store.put('durable_tasks', task['id'], task)
-                    self.store.put('durable_runs', run['id'], run)
-                    reconcile_claim = (task, run, generation)
-                else:
-                    reconcile_claim = None
-            else:
-                reconcile_claim = None
+            reconcile_claim = None
+            for run in reconcile_queue:
+                try:
+                    task = self.store.get('durable_tasks', run['task_id'])
+                except FileNotFoundError:
+                    continue
+                if task['status'] != 'reconciling' or task['latest_run_id'] != run['id']:
+                    continue
+                task['generation'] += 1
+                generation = task['generation']
+                run.update(status='reconcile_running', generation=generation, updated_at=now())
+                self.store.put('durable_tasks', task['id'], task)
+                self.store.put('durable_runs', run['id'], run)
+                reconcile_claim = (task, run, generation)
+                break
         if reconcile_claim:
             return await self._reconcile_research_run(*reconcile_claim)
         with self.store.locked():
             queued = sorted((r for r in self.store.list("durable_runs") if r["status"] == "queued"), key=lambda r: r["created_at"])
             eligible = []
             for candidate in queued:
-                candidate_task = self.store.get("durable_tasks", candidate["task_id"])
+                try:
+                    candidate_task = self.store.get("durable_tasks", candidate["task_id"])
+                except FileNotFoundError:
+                    continue
                 if candidate_task["status"] == "queued" and candidate_task["latest_run_id"] == candidate["id"]:
                     eligible.append((candidate, candidate_task))
             if not eligible:

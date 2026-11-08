@@ -730,3 +730,109 @@ def test_research_url_backfills_after_origin_returns(tmp_path):
                                     research_origin='https://overleaf.example')
     with executor_lock(store): assert asyncio.run(configured.worker_once()) is None
     assert configured.get('alice',task['id'])['research_project_url'] == 'https://overleaf.example/project/'+'c'*24
+
+
+def test_static_endpoint_lost_sandbox_reply_fences_until_run_inventory_absent(tmp_path):
+    """Synthetic controller reply loss after creating a Run-tagged Sandbox."""
+    class Parent:
+        def __init__(self):
+            self.lock = asyncio.Lock()
+            self.settings = TaskSettings('http://127.0.0.1:1234', 'synthetic')
+            self.docker = SimpleNamespace(containers=SimpleNamespace(list=lambda **_: []))
+            self.found = []
+        async def find_run_sandboxes(self, run_id): return self.found
+    parent = Parent()
+    codex = CodexTaskExecutor(parent, CodexRuntime('http://127.0.0.1:8001/v1',
+                              'synthetic-token', images={'python':'synthetic'}))
+    class LostReplyService:
+        async def create(self, **kwargs):
+            assert kwargs['durable_run_id'] == first['latest_run_id']
+            parent.found = ['synthetic-run-owned-container']
+            raise RuntimeError('synthetic lost Sandbox create reply')
+    class Executor:
+        images = {'python':'synthetic'}
+        def __init__(self): self.calls = []
+        async def reconcile_durable(self, run): return await codex.reconcile_durable(run)
+        async def execute_durable(self, task, run, checkpoint, save, progress):
+            self.calls.append(run['id'])
+            if run['id'] == first['latest_run_id']:
+                return await codex.execute_durable(task, run, checkpoint, save, progress)
+            return {'ok':False,'artifacts':[], 'cleanup':{'not_created':True,'container_absent':True},
+                    'credential_closure':{'not_created':True}}
+    executor = Executor()
+    svc = DurableTaskService(TaskStore(tmp_path/'state'), executor)
+    first, second = created_like(svc, 'lost-reply'), created_like(svc, 'next-run')
+    with patch('chattask.codex_tasks.TaskService', return_value=LostReplyService()):
+        with executor_lock(svc.store): blocked = asyncio.run(svc.worker_once())
+    raw = svc.store.get('durable_runs', first['latest_run_id'])
+    assert blocked['status'] == 'blocked'
+    assert raw['phase'] == 'sandbox_intent'
+    assert raw['reconciliation_required'] is True
+    assert not raw['cleanup'].get('not_created')
+    with executor_lock(svc.store): assert asyncio.run(svc.worker_once()) is None
+    assert executor.calls == [first['latest_run_id']]
+    parent.found = []
+    with executor_lock(svc.store): selected = asyncio.run(svc.worker_once())
+    assert selected['id'] == second['latest_run_id']
+    assert svc.store.get('durable_runs', first['latest_run_id'])['reconciliation_required'] is False
+
+
+def test_static_endpoint_precreate_progress_failure_does_not_fence_next_run(tmp_path):
+    parent = SimpleNamespace(lock=asyncio.Lock(),
+                             settings=TaskSettings('http://127.0.0.1:1234', 'synthetic'), docker=None)
+    codex = CodexTaskExecutor(parent, CodexRuntime('http://127.0.0.1:8001/v1',
+                              'synthetic-token', images={'python':'synthetic'}))
+    class Executor:
+        images = {'python':'synthetic'}
+        async def execute_durable(self, task, run, checkpoint, save, progress):
+            if run['id'] == first['latest_run_id']:
+                return await codex.execute_durable(task, run, checkpoint, save, progress)
+            return {'ok':False,'artifacts':[], 'cleanup':{'not_created':True,'container_absent':True},
+                    'credential_closure':{'not_created':True}}
+    svc = DurableTaskService(TaskStore(tmp_path/'state'), Executor())
+    first, second = created_like(svc, 'precreate-fail'), created_like(svc, 'next-safe')
+    original = svc.store.put
+    def fail_intent(collection, ident, value):
+        if collection == 'durable_runs' and ident == first['latest_run_id'] and value.get('phase') == 'sandbox_intent':
+            raise OSError('synthetic progress write failed before create')
+        return original(collection, ident, value)
+    class NoCreate:
+        async def create(self, **kwargs): pytest.fail('Sandbox creation must not be attempted')
+    svc.store.put = fail_intent
+    with patch('chattask.codex_tasks.TaskService', return_value=NoCreate()):
+        with executor_lock(svc.store): asyncio.run(svc.worker_once())
+    svc.store.put = original
+    raw = svc.store.get('durable_runs', first['latest_run_id'])
+    assert raw['cleanup']['not_created'] is True
+    assert raw['reconciliation_required'] is False
+    with executor_lock(svc.store): selected = asyncio.run(svc.worker_once())
+    assert selected['id'] == second['latest_run_id']
+
+
+@pytest.mark.parametrize('successor_status', ['queued', 'blocked'])
+def test_research_url_backfills_from_older_verified_receipt(tmp_path, successor_status):
+    store = TaskStore(tmp_path/'state')
+    publisher = SimpleNamespace(publish=lambda *args: pytest.fail('must not republish'))
+    without_origin = DurableTaskService(store, CompletingExecutor(), research_publisher=publisher)
+    sources = [{'id':'paper-1','url':'https://example.org/paper','title':'Paper','content':'Excerpt'}]
+    task = without_origin.create('alice', {'request_id':'older-receipt','instructions':'Research recovery',
+                'image_profile':'python','workflow':'research','source_records':sources})
+    older = store.get('durable_runs', task['latest_run_id'])
+    state = store.get('durable_tasks', task['id'])
+    older.update(status='completed', research_receipt={'root_doc_id':'b'*24,'project_id':'c'*24})
+    state['status'] = 'reconciling'
+    store.put('durable_runs',older['id'],older); store.put('durable_tasks',state['id'],state)
+    with executor_lock(store): assert asyncio.run(without_origin.worker_once()) is None
+    assert store.get('durable_tasks', task['id'])['research_root_doc_id'] == 'b'*24
+    assert not store.get('durable_tasks', task['id']).get('research_project_url')
+    successor = {**older, 'id':'d'*32, 'number':2, 'status':successor_status,
+                 'research_receipt':None, 'request_id':'successor', 'updated_at':'later'}
+    state = store.get('durable_tasks', task['id'])
+    state.update(latest_run_id=successor['id'], status=successor_status)
+    store.put('durable_runs',successor['id'],successor); store.put('durable_tasks',state['id'],state)
+    configured = DurableTaskService(store, CompletingExecutor(), research_publisher=publisher,
+                                    research_origin='https://overleaf.example')
+    with store.locked(): configured._recover_durable_state()
+    repaired = store.get('durable_tasks', task['id'])
+    assert repaired['research_root_doc_id'] == 'b'*24
+    assert repaired['research_project_url'] == 'https://overleaf.example/project/'+'c'*24

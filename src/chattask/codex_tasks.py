@@ -154,6 +154,7 @@ class CodexTaskExecutor:
             raise ValueError('read-only verification requires gateway, trusted hook and approved input')
         service=None
         sandbox=cfg=None;outcome={'ok':False,'artifacts':[],'cleanup':{'container_absent':True,'not_created':True}}
+        sandbox_create_attempted=False
         async with self.task_service.lock:
             gateway_intent=False
             try:
@@ -177,6 +178,7 @@ class CodexTaskExecutor:
                 create_options={'ttl_seconds':(120 if mode=='verify' else runtime.seconds)+(hook[1] if hook else 0)+120}
                 if durable:create_options['durable_run_id']=task['id']
                 if durable:outcome['cleanup']={'container_absent':False,'creation_outcome_unknown':True}
+                sandbox_create_attempted=True
                 sandbox,cfg,details=await service.create(**create_options)
                 outcome.update(sandbox_id=sandbox.id,runtime=details,cleanup={'container_absent':False})
                 if durable:
@@ -308,7 +310,7 @@ class CodexTaskExecutor:
                 outcome['ok']=True
             except Exception as exc:
                 outcome['error']=runtime.redact(str(exc))[:1800]
-                if durable and not gateway_intent and lease is None and sandbox is None:
+                if durable and not gateway_intent and lease is None and sandbox is None and not sandbox_create_attempted:
                     outcome['cleanup']={'not_created':True,'container_absent':True}
                     outcome['credential_closure']={'not_created':True}
                 if durable and model_quiescent and sandbox is not None and not outcome.get('codex_session_id'):

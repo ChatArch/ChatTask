@@ -469,14 +469,15 @@ class DurableTaskService:
                     self.store.get('durable_runs', run_id)
                 except FileNotFoundError:
                     self.store.put('durable_runs', run_id, initial)
-            if task.get('workflow') == 'research' and self.research_origin and run_id:
-                try:
-                    latest = self.store.get('durable_runs', run_id)
-                except FileNotFoundError:
-                    continue
-                receipt = latest.get('research_receipt') if latest.get('status') == 'completed' else None
-                if (isinstance(receipt, dict) and all(isinstance(receipt.get(key), str)
-                        and re.fullmatch(r'[a-f0-9]{24}', receipt[key]) for key in ('root_doc_id', 'project_id'))):
+            if task.get('workflow') == 'research' and self.research_origin:
+                verified = [run for run in runs if run.get('task_id') == task['id']
+                            and run.get('status') == 'completed'
+                            and isinstance(run.get('research_receipt'), dict)
+                            and all(isinstance(run['research_receipt'].get(key), str)
+                                    and re.fullmatch(r'[a-f0-9]{24}', run['research_receipt'][key])
+                                    for key in ('root_doc_id', 'project_id'))]
+                if verified:
+                    receipt = max(verified, key=lambda run: (run['number'], run['updated_at']))['research_receipt']
                     url = self.research_origin + '/project/' + receipt['project_id']
                     if task.get('research_root_doc_id') != receipt['root_doc_id'] or task.get('research_project_url') != url:
                         task.update(research_root_doc_id=receipt['root_doc_id'], research_project_url=url,

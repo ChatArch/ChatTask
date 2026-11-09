@@ -10,14 +10,11 @@ import { Project } from './app/src/models/Project.mjs'
 import ProjectCreationHandler from './app/src/Features/Project/ProjectCreationHandler.mjs'
 import ProjectEntityUpdateHandler from './app/src/Features/Project/ProjectEntityUpdateHandler.mjs'
 import DocumentUpdaterHandler from './app/src/Features/DocumentUpdater/DocumentUpdaterHandler.mjs'
-import CompileManager from './app/src/Features/Compile/CompileManager.mjs'
-import ClsiManager from './app/src/Features/Compile/ClsiManager.mjs'
 
 const FRAME = '@@CHATTASK_RESEARCH_NATIVE_V1@@'
 const ID = /^[0-9a-f]{32}$/
 const OID = /^[0-9a-f]{24}$/
 const FILE = /^[A-Za-z][A-Za-z0-9_-]{0,63}\.(tex|bib|md|json)$/
-const MAX_PDF = 20 * 1024 * 1024
 const TEX_COMMANDS = new Set(['author', 'begin', 'bibitem', 'cite', 'date', 'documentclass',
   'emph', 'end', 'hline', 'item', 'maketitle', 'section', 'subsection', 'setlength',
   'small', 'tabcolsep', 'texttt', 'title', 'url', 'usepackage', '_', '\\'])
@@ -87,7 +84,7 @@ async function readInput() {
 }
 
 function validate(request) {
-  if (!request || typeof request !== 'object' || !['probe', 'publish', 'readback'].includes(request.action)) fail('invalid-action')
+  if (!request || typeof request !== 'object' || !['probe', 'publish_source', 'readback'].includes(request.action)) fail('invalid-action')
   if (request.action === 'probe') return
   if (typeof request.task_id !== 'string' || !ID.test(request.task_id) ||
       typeof request.run_id !== 'string' || !ID.test(request.run_id)) fail('invalid-id')
@@ -218,31 +215,13 @@ async function switchRoot(project, ownerId, request) {
   return { rootId, previous: current }
 }
 
-async function pdfFromCompile(projectId, ownerId, result) {
-  if (result.status !== 'success' || !result.buildId ||
-      !result.outputFiles?.some(file => file.path === 'output.pdf')) fail('compile-failed')
-  const userId = Settings.disablePerUserCompiles ? null : ownerId
-  const stream = await ClsiManager.promises.getOutputFileStream(projectId, userId,
-    result.clsiServerId, result.buildId, 'output.pdf')
-  const chunks = []
-  let size = 0
-  for await (const chunk of stream) {
-    size += chunk.length
-    if (size > MAX_PDF) fail('pdf-too-large')
-    chunks.push(chunk)
-  }
-  const pdf = Buffer.concat(chunks)
-  if (pdf.length < 20 || !pdf.subarray(0, 5).equals(Buffer.from('%PDF-'))) fail('invalid-pdf')
-  return pdf
-}
-
 async function execute(request) {
   validate(request)
   await mongoose.connectionPromise
   const ownerId = await owner()
   if (request.action === 'probe') return { status: 'ok', owner_verified: true }
   let project = await findProject(request.task_id, ownerId, request.project_id || null,
-    request.action === 'publish', request.action === 'readback')
+    request.action === 'publish_source', request.action === 'readback')
   if (request.action === 'readback') {
     const names = Object.keys(request.file_sha256 || {})
     if (!project) return { status: 'ok', project_exists: false, owner_verified: true,
@@ -264,11 +243,6 @@ async function execute(request) {
   project = await appendDocuments(project, ownerId, request)
   const root = await switchRoot(project, ownerId, request)
   const projectId = String(project._id)
-  const compile = await CompileManager.promises.compile(projectId, ownerId, {
-    rootResourcePath: `r_${request.run_id}_main.tex`,
-    rootDoc_id: root.rootId,
-  })
-  const pdf = await pdfFromCompile(projectId, ownerId, compile)
   project = await Project.findById(projectId, { rootDoc_id: 1, rootFolder: 1,
     owner_ref: 1, description: 1, compiler: 1, publicAccesLevel: 1 }).exec()
   if (!project || String(project.rootDoc_id) !== root.rootId ||
@@ -280,13 +254,11 @@ async function execute(request) {
   }
   return { status: 'ok', project_id: projectId, owner_verified: true,
     root_doc_id: root.rootId, previous_root_doc_id: root.previous,
-    compiler: 'xelatex', compile_status: compile.status, build_id: compile.buildId,
-    source_files: sourceFiles, pdf_base64: pdf.toString('base64'),
+    compiler: 'xelatex', source_files: sourceFiles,
     provenance: 'original-service-document-readback' }
 }
 
-// CompileManager's internal request timeout is 12 minutes. This independent
-// bound leaves time to frame an unknown outcome and exit normally. Any write
+// This bound leaves time to frame an unknown outcome and exit normally. Any write
 // may already have happened; the Python journal must remain pending.
 const NATIVE_DEADLINE_MS = 13 * 60 * 1000
 let deadlineTimer

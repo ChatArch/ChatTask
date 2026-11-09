@@ -29,6 +29,11 @@ MAIN = r"\documentclass{ctexart}\begin{document}Evidence.\begin{thebibliography}
 PDF = b"%PDF-1.7\n" + b"0" * 100
 
 
+class SyntheticCompilerPreflight:
+    def prepare(self): return {'synthetic': True}
+    def compile(self, *args): pytest.fail('native transport did not return verified source')
+
+
 class SyntheticBridge:
     def __init__(self):
         self.calls = []
@@ -181,7 +186,7 @@ def test_invalid_native_frame_and_no_request_in_argv(monkeypatch):
             return ("upstream logger line\n", "")
 
     monkeypatch.setattr(subprocess, "Popen", FakeProcess)
-    bridge = DockerOverleafBridge("example-container", "http://internal.example")
+    bridge = DockerOverleafBridge("example-container", "http://internal.example", compiler=SyntheticCompilerPreflight())
     with pytest.raises(ResearchUnavailable):
         bridge({"action": "publish", "files": {"main.tex": "unique-private-content"}})
     assert "unique-private-content" in observed["input"]
@@ -211,7 +216,7 @@ def test_outer_timeout_preserves_pid_without_signals(monkeypatch, tmp_path):
             raise AssertionError("must not terminate")
 
     monkeypatch.setattr(subprocess, "Popen", TimedProcess)
-    bridge = DockerOverleafBridge("example-container", "http://internal.example")
+    bridge = DockerOverleafBridge("example-container", "http://internal.example", compiler=SyntheticCompilerPreflight())
     with pytest.raises(ResearchUnavailable):
         ResearchPublisher(tmp_path, bridge).publish(TASK, RUN, {"main.tex": MAIN}, "req-1")
     state = json.loads((tmp_path / TASK / "state.json").read_text())
@@ -248,7 +253,7 @@ def test_red_helper_timeout_blocks_overlapping_retry(monkeypatch, tmp_path):
         terminate = kill
 
     monkeypatch.setattr(subprocess, "Popen", LiveDockerClient)
-    publisher = ResearchPublisher(tmp_path, DockerOverleafBridge("example-container", "http://internal.example"))
+    publisher = ResearchPublisher(tmp_path, DockerOverleafBridge("example-container", "http://internal.example", compiler=SyntheticCompilerPreflight()))
     with pytest.raises(ResearchUnavailable):
         publisher.publish(TASK, RUN, {"main.tex": MAIN}, "same-request")
     with pytest.raises(ResearchUnavailable):

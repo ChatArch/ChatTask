@@ -776,8 +776,11 @@ async def run_worker(settings, *, once=False):
     publisher = None
     if settings.research_container and settings.research_origin:
         from .research import ResearchPublisher, DockerOverleafBridge
+        from .research_compiler import IsolatedResearchCompiler
         publisher = ResearchPublisher(store.root / 'research',
-                                      DockerOverleafBridge(settings.research_container, settings.research_origin))
+                                      DockerOverleafBridge(settings.research_container, settings.research_origin,
+                                          compiler=IsolatedResearchCompiler(sandbox.docker,
+                                              store.root / 'research-compiler', settings.research_container)))
     tasks = DurableTaskService(store, executor, research_publisher=publisher, research_origin=settings.research_origin)
     try:
         with executor_lock(store):

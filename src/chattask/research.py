@@ -225,7 +225,7 @@ class DockerOverleafBridge:
 
     tracks_native_process = True
 
-    def __init__(self, container_name: str, origin: str):
+    def __init__(self, container_name: str, origin: str, *, compiler=None):
         if not isinstance(container_name, str) or not CONTAINER.fullmatch(container_name):
             raise ResearchError("invalid operator container name")
         try:
@@ -237,6 +237,7 @@ class DockerOverleafBridge:
             raise ResearchError("invalid operator service origin")
         self.container_name = container_name
         self.origin = origin.rstrip("/")
+        self.compiler = compiler
 
     def project_url(self, project_id: str) -> str:
         """Build a project link only from trusted operator origin and native id."""
@@ -244,7 +245,27 @@ class DockerOverleafBridge:
             raise ResearchError("invalid native project id")
         return f"{self.origin}/project/{project_id}"
 
-    def __call__(self, payload: dict, *, on_start=None, on_exit=None) -> dict:
+    def __call__(self, payload: dict, *, on_start=None, on_exit=None, compiler_plan=None) -> dict:
+        if payload.get('action') != 'publish':
+            return self._native_call(payload, on_start=on_start, on_exit=on_exit)
+        if self.compiler is None:
+            raise ResearchUnavailable('isolated compiler is not configured')
+        # Resolve image and toolchain before the original service is modified.
+        plan = compiler_plan if compiler_plan is not None else self.compiler.prepare()
+        request = {**payload, 'action': 'publish_source'}
+        result = self._native_call(request, on_start=on_start, on_exit=on_exit)
+        if not isinstance(result, dict) or result.get('status') != 'ok' or result.get('owner_verified') is not True or result.get('provenance') != 'original-service-document-readback':
+            raise ResearchUnavailable('original service source publication unverified')
+        run_id = payload['run_id']
+        expected = {f'r_{run_id}_{name}': body for name, body in payload['files'].items()}
+        if result.get('source_files') != expected:
+            raise ResearchConflict('original service document readback differs')
+        pdf, build = self.compiler.compile(payload['task_id'], run_id, payload['files'], plan)
+        return {**result, 'compile_status':'success', 'build_id':build['nonce'],
+                'pdf_base64':base64.b64encode(pdf).decode(),
+                'isolated_compiler': build}
+
+    def _native_call(self, payload: dict, *, on_start=None, on_exit=None) -> dict:
         # Code is a packaged static asset. Only validated JSON goes over stdin.
         script = Path(__file__).with_name("overleaf_native.mjs").read_text()
         argv = ["docker", "exec", "-i", "-w", "/overleaf/services/web", self.container_name,
@@ -370,6 +391,11 @@ class ResearchPublisher:
         tracked = isinstance(self.bridge, DockerOverleafBridge)
         if old and tracked:
             self._reconcile_native(task_dir, state, run_id, digest_map, fingerprint, task_id, expected)
+        compiler_plan = None
+        if tracked and self.bridge.compiler is not None:
+            # A missing image/toolchain must not leave a native-intent journal
+            # for an operation that could not have reached the original service.
+            compiler_plan = self.bridge.compiler.prepare()
         if not old:
             state["runs"][run_id] = {"fingerprint": fingerprint, "status": "pending", "request_id": request_id,
                                       "file_sha256": digest_map, "expected_root_doc_id": expected,
@@ -395,10 +421,15 @@ class ResearchPublisher:
                                 "returncode": returncode, "frame": frame}
                 _json_write(task_dir / f"{run_id}.{intent['id']}.helper-exit.json", exit_receipt)
         try:
-            result = self.bridge(payload, on_start=on_start, on_exit=on_exit) if tracked else self.bridge(payload)
+            if compiler_plan is not None:
+                result = self.bridge(payload, on_start=on_start, on_exit=on_exit,
+                                     compiler_plan=compiler_plan)
+            else:
+                result = self.bridge(payload, on_start=on_start, on_exit=on_exit) if tracked else self.bridge(payload)
             if inspect.isawaitable(result):
                 result = asyncio.run(result)
-            verified = self._verify_native(result, run_id, files, expected)
+            verified = self._verify_native(result, run_id, files, expected,
+                                           require_isolated=tracked and self.bridge.compiler is not None)
             if state["project_id"] and state["project_id"] != verified["project_id"]:
                 raise ResearchConflict("native project binding changed")
             receipt, pdf, source = verified["receipt"], verified["pdf"], verified["source"]
@@ -472,7 +503,8 @@ class ResearchPublisher:
             raise ResearchConflict("native root changed during reconciliation")
 
     @staticmethod
-    def _verify_native(result: dict, run_id: str, files: dict[str, str], expected: str | None) -> dict:
+    def _verify_native(result: dict, run_id: str, files: dict[str, str], expected: str | None,
+                       *, require_isolated=False) -> dict:
         if not isinstance(result, dict):
             raise ResearchUnavailable("invalid native receipt")
         if result.get("status") == "conflict":
@@ -484,6 +516,18 @@ class ResearchPublisher:
             raise ResearchUnavailable("invalid native project or root id")
         if result.get("compiler") != "xelatex" or result.get("compile_status") != "success" or not isinstance(result.get("build_id"), str) or not result["build_id"]:
             raise ResearchUnavailable("native compile did not succeed")
+        isolation = result.get('isolated_compiler')
+        if require_isolated and (not isinstance(isolation, dict)
+                                 or not isinstance(isolation.get('image_id'), str)
+                                 or not re.fullmatch(r'sha256:[0-9a-f]{64}', isolation['image_id'])
+                                 or not isinstance(isolation.get('container_id'), str)
+                                 or not re.fullmatch(r'[0-9a-f]{64}', isolation['container_id'])
+                                 or not isinstance(isolation.get('nonce'), str)
+                                 or not re.fullmatch(r'[0-9a-f]{32}', isolation['nonce'])
+                                 or result['build_id'] != isolation['nonce']
+                                 or isolation.get('isolation') != 'no-network-read-only-rootfs-task-mounts'
+                                 or isolation.get('passes') != 2):
+            raise ResearchUnavailable('isolated compiler receipt missing')
         if result.get("provenance") != "original-service-document-readback":
             raise ResearchUnavailable("unverified source provenance")
         native_files = result.get("source_files")
@@ -496,6 +540,8 @@ class ResearchPublisher:
             raise ResearchUnavailable("invalid native PDF encoding") from None
         if not pdf.startswith(b"%PDF-") or not 20 <= len(pdf) <= MAX_PDF:
             raise ResearchUnavailable("invalid or oversized native PDF")
+        if require_isolated and isolation.get('pdf_sha256') != _digest(pdf):
+            raise ResearchUnavailable('isolated PDF digest mismatch')
         stream = io.BytesIO()
         with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for name, content in sorted(native_files.items()):
@@ -511,6 +557,8 @@ class ResearchPublisher:
                    "pdf_sha256": _digest(pdf), "source_zip_sha256": _digest(source),
                    "source_provenance": result["provenance"],
                    "operation_provenance": "trusted-original-service-native-script"}
+        if isolation is not None:
+            receipt['isolated_compiler'] = isolation
         return {"project_id": project_id, "root_doc_id": root_doc_id, "receipt": receipt, "pdf": pdf, "source": source}
 
 

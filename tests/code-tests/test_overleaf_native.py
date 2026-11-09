@@ -104,16 +104,9 @@ console.log(JSON.stringify(outcome))
     assert json.loads(done.stdout) == "document-conflict"
 
 
-def test_null_clsi_server_id_is_valid_single_instance():
+def test_native_source_publication_cannot_invoke_compiler():
     source = HELPER.read_text()
-    section = source[source.index("async function pdfFromCompile("):source.index("async function execute(")]
-    script = """
-const calls=[]
-const MAX_PDF=20*1024*1024
-const Settings={disablePerUserCompiles:true}
-const ClsiManager={promises:{getOutputFileStream:async (...args)=>{calls.push(args);return (async function*(){yield Buffer.from('%PDF-1.7\\n'+ 'x'.repeat(30))})()}}}
-function fail(code){throw Error(code)}
-""" + section + "\nconst pdf=await pdfFromCompile('p','u',{status:'success',buildId:'build',clsiServerId:null,outputFiles:[{path:'output.pdf'}]});console.log(JSON.stringify({size:pdf.length,calls}))"
-    done = subprocess.run(["node", "--input-type=module", "--eval", script], text=True, capture_output=True, timeout=5)
-    assert done.returncode == 0, done.stderr
-    assert json.loads(done.stdout)["calls"][0] == ["p", None, None, "build", "output.pdf"]
+    assert "'publish_source'" in source
+    assert 'CompileManager' not in source
+    assert 'ClsiManager' not in source
+    assert 'pdf_base64' not in source

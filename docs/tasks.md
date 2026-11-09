@@ -1,5 +1,17 @@
 # 通用任务与镜像
 
+## 长期任务候选
+
+长期 Task 与一次性 `chattask run` 独立：`POST /api/durable/tasks` 接受 `request_id`、`instructions`、`image_profile`，登录主体成为所有者；`GET /api/durable/tasks`、`/{id}`、`/{id}/runs` 返回私有历史。`POST /{id}/resume` 接受新的 `request_id`、`instructions` 和可选 `acknowledge_unknown=true`；`POST /{id}/pause`、`/{id}/complete` 接受 `request_id`。`POST /{id}/members` 仅所有者可授予已命名主体 `viewer` 或 `editor`，所有控制请求记载发起者。`GET /{id}/runs/{run_id}/artifacts/{name}` 在权限和 SHA256 核对后下载产物。路径均以 `/api/durable/tasks` 为前缀；所有写入使用已有站点 CSRF。请求 ID 重复且输入相同返回原结果，输入不同返回冲突；活动轮次不能重复接续。
+
+创建时 `workflow=development` 为默认；研究任务可显式设置 `workflow=research` 并提供 1–12 条已核对来源 `source_records`，也可在登录后调用 `POST /api/durable/research/auto`，提供 `request_id`、研究 `instructions`、`image_profile`、英文或中文纯文本 `query` 和可选 `max_results`（1–5），由可信服务端检索 arXiv 官方 Atom 摘要并把实际来源快照保存到 Task。自动检索仅含摘要，不代表读过论文全文；须人工核查相关性。后续轮次可提供新来源记录，否则继承上一轮。模型需写 `/workspace/result/research/main.tex`，采用自包含 `ctexart`/xelatex 和内联参考文献；`references.bib`、报告和来源元数据可另存。受信 worker 只从本轮结果归档读取研究文件，不接受浏览器给出的容器、工程、用户、路径或命令。原 Overleaf 工程由受信 `ResearchPublisher` 绑定同一 Task，PDF 与源码回读作为本轮 `research.pdf`、`research-source.zip` 产物；完成前记录原生工程收据并展示工程链接。编译、同步或冲突失败保持阻塞。外部结果不明时，检查原工程后使用 `POST /{id}/reconcile-research`，附新的 `request_id` 和 `acknowledge_unknown=true`；独立 worker 用同一 Run/发布操作身份核对，不重跑 Codex。
+
+研究桥仅在同时配置 `CHATTASK_RESEARCH_OVERLEAF_CONTAINER` 与 HTTPS `CHATTASK_RESEARCH_OVERLEAF_ORIGIN` 时启用，普通开发任务不依赖它们。可选敏感 `CHATTASK_LOGIN_USERS_JSON` 为最多八条 `username`、`password`、`principal_id`、`display_name` 记录，经共享 ChatLogin 验证；原站点管理员用户名/密码及 `site-operator` 主体保留，主体 ID 必须唯一。不要在生产配置中创建测试账号。所有配置由运维提供，不由浏览器传入。
+
+Web 只排队；独立运行 `chattask worker --env-profile site --operator operator`，可用 `--once` 有界处理一轮。可信本机 CLI 使用 `chattask task create/list/show/resume/pause/complete` 与显式 `--owner`、`--env-profile`。Worker 必须配置原模型网关、OpenSandbox 和已登记镜像；一个进程持有原生 flock，重启发现运行中轮次会标为中断并要求人工核对可能的外部写入。队列不会自动重放。Web 重启不取消独立 worker。
+
+每轮在新 Sandbox 运行，保存 `/workspace/work`、`/workspace/result` 和 `$CODEX_HOME/sessions` 的有限归档；拒绝链接、越界路径、特殊文件、敏感文件名、超额内容和已知临时凭据。成功轮次需要原生 session ID、`turn.completed`、已验证检查点、容器回收与网关租约关闭。恢复时使用精确 session ID 的 `codex exec resume`，在 guest 验证命令选项；不复制上一轮文字作为新会话。暂停是协作式阶段边界操作：排队轮次可在运行前暂停，运行中轮次到本轮结束才暂停。失败或中断需检查后显式接续；首轮没有检查点的失败保持阻塞。生产可用性仍需以部署后的真实镜像、网关、原站与浏览器验收为准。
+
 <div class="grid cards" markdown>
 
 - **任务**：用户目标、验收要求、稳定请求 ID、镜像配置；可选择自己此前的结果作为输入。

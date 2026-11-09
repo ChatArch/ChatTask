@@ -24,7 +24,11 @@ chattask
 ├── tool_client.ChatPyPITools      # PyPI 命名 profile / ChatAuth TokenStore / REST
 ├── release.ChatGHReleaseAdapter   # 已合并 PR、检查、标签写入/核对
 ├── workspace_analysis.WorkspaceAnalysis  # 材料草稿/确认/Run/摘要报告，独立只读执行器
-├── create_app(settings, service=..., workflow=..., agent_tasks=..., analysis=...)
+├── durable.DurableTaskService  # create/list/get/runs/resume/pause/complete/grant/artifact/worker_once
+├── durable.executor_lock / run_worker  # 单写者进程锁与独立队列执行
+├── durable_archive.validate_checkpoint  # 私有归档结构、预算及已知凭据扫描
+├── durable_research.source_records / research_files  # 有界来源和本轮研究产物适配
+├── create_app(settings, service=..., workflow=..., agent_tasks=..., analysis=..., durable_tasks=...)
 └── state_paths(home=...)
 ```
 

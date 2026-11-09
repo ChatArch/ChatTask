@@ -11,6 +11,7 @@ import json
 import re
 import shlex
 import tarfile
+import uuid
 from urllib.parse import urlsplit
 from opensandbox.models.execd import RunCommandOpts
 from .service import TaskService
@@ -73,6 +74,19 @@ with tarfile.open('/workspace/result.tar.gz','w:gz') as archive:
 print(json.dumps({'files':len(files),'bytes':total}))
 '''
 
+
+def native_resume_argv(common, model, session_id, help_text, root_help):
+    """Build only the flags confirmed by the installed guest CLI help."""
+    try:
+        uuid.UUID(session_id)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError('invalid native Codex session id') from exc
+    if not all(flag in help_text for flag in ('SESSION_ID','--json','--output-last-message','--model','--skip-git-repo-check')) or not all(flag in root_help for flag in ('--cd','--sandbox')):
+        raise RuntimeError('guest Codex lacks required native resume flags')
+    return [*common,'--sandbox','danger-full-access','--cd','/workspace/work','exec','resume',
+            '--skip-git-repo-check','--model',model,'--json',
+            '--output-last-message','/workspace/agent-final.md',session_id,'-']
+
 class CodexTaskExecutor:
     def __init__(self,task_service,runtime:CodexRuntime,*,gateway=None,hosts=None):
         self.task_service=task_service;self.runtime=runtime;self.images=dict(runtime.images)
@@ -86,8 +100,52 @@ class CodexTaskExecutor:
             raise ValueError('conflicting trusted postprocessor')
         self.postprocessors[mode]=selected
 
+    async def execute_durable(self,task,run,checkpoint,save_checkpoint,progress):
+        """Internal-only invocation; public generic create cannot supply these fields."""
+        from .durable_archive import validate_checkpoint
+        if checkpoint is not None:
+            validate_checkpoint(checkpoint, expected=task['checkpoint'], session_id=run['session_id'])
+        instructions=run['instructions']
+        if run.get('workflow')=='research':
+            from .research import research_instructions
+            instructions=(research_instructions(task['goal'],run['source_records'],followup=run['number']>1)
+                          +'\nPlace every result/research path under /workspace/result/research. '
+                          'Only the provided, caller-verified source records are available; do not claim autonomous discovery.\n'
+                          +'CURRENT ROUND REQUEST:\n'+instructions)
+        invocation={'id':run['id'],'instructions':instructions,
+                    'image_profile':task['image_profile'],
+                    '_durable':{'checkpoint':checkpoint,'session_id':run['session_id'],
+                                'save_checkpoint':save_checkpoint}}
+        return await self.execute(invocation,progress,lambda: False)
+
+    async def reconcile_durable(self,run):
+        """Allow a new writer only after exact owned-container absence and lease closure."""
+        sandbox_id, receipt = run.get('sandbox_id'), run.get('runtime_receipt')
+        if not run.get('phase') and (not sandbox_id or not isinstance(receipt,dict)):
+            return False
+        try:
+            finder=getattr(self.task_service,'find_run_sandboxes',None)
+            if finder is not None:
+                # Controller metadata catches a created Sandbox whose response/id was lost.
+                if await finder(run['id']):return False
+            elif not sandbox_id or not isinstance(receipt,dict):
+                return False
+            if sandbox_id:
+                matched=[container for container in self.task_service.docker.containers.list(all=True)
+                         if container.name=='sandbox-'+sandbox_id]
+                if matched:return False
+            if self.gateway:
+                closed=await asyncio.to_thread(self.gateway.close,run['id'])
+                if closed!={'closed':True}:
+                    return False
+            return True
+        except Exception:
+            return False
+
     async def execute(self,task,update,cancelled):
         runtime=self.runtime
+        durable=task.get('_durable')
+        model_quiescent=False
         lease=None
         capability=task.get('capability') or {}
         mode=capability.get('mode','generic')
@@ -96,12 +154,18 @@ class CodexTaskExecutor:
             raise ValueError('read-only verification requires gateway, trusted hook and approved input')
         service=None
         sandbox=cfg=None;outcome={'ok':False,'artifacts':[],'cleanup':{'container_absent':True,'not_created':True}}
+        sandbox_create_attempted=False
         async with self.task_service.lock:
-            if self.gateway:
-                plan=capability.get('plan')
-                if mode=='verify':plan={**plan,'verification_of':capability['source_task_id']}
-                lease=await asyncio.to_thread(self.gateway.create,task['id'],mode,plan)
+            gateway_intent=False
             try:
+                if self.gateway:
+                    if durable:
+                        await update({'phase':'gateway_intent'})
+                        gateway_intent=True
+                    plan=capability.get('plan')
+                    if mode=='verify':plan={**plan,'verification_of':capability['source_task_id']}
+                    lease=await asyncio.to_thread(self.gateway.create,task['id'],mode,plan)
+                    if durable:await update({'phase':'gateway_created'})
                 if lease is not None:
                     if mode=='verify':
                         runtime=replace(runtime,tool_base_url=lease.tool_base_url,tool_access_token=lease.tool_access_token)
@@ -110,19 +174,44 @@ class CodexTaskExecutor:
                                         tool_base_url=lease.tool_base_url,tool_access_token=lease.tool_access_token)
                 service=TaskService(replace(self.task_service.settings,image=self.images[task['image_profile']]),docker_client=self.task_service.docker)
                 await update({'index':0,'status':'running'})
-                sandbox,cfg,details=await service.create(ttl_seconds=(120 if mode=='verify' else runtime.seconds)+(hook[1] if hook else 0)+120)
+                if durable:await update({'phase':'sandbox_intent'})
+                create_options={'ttl_seconds':(120 if mode=='verify' else runtime.seconds)+(hook[1] if hook else 0)+120}
+                if durable:create_options['durable_run_id']=task['id']
+                if durable:outcome['cleanup']={'container_absent':False,'creation_outcome_unknown':True}
+                sandbox_create_attempted=True
+                sandbox,cfg,details=await service.create(**create_options)
                 outcome.update(sandbox_id=sandbox.id,runtime=details,cleanup={'container_absent':False})
-                async def command(argv,seconds=30,cwd='/workspace'):
+                if durable:
+                    await update({'phase':'sandbox_created','sandbox_id':sandbox.id,'runtime':details})
+                async def command(argv,seconds=30,cwd='/workspace',full_stdout_limit=None):
+                    nonlocal model_quiescent
                     env=runtime.guest_env()
                     if mode=='verify':env.pop('CHATTASK_CODEX_API_KEY',None)
                     output=await asyncio.wait_for(sandbox.commands.run(shlex.join(argv),opts=RunCommandOpts(
                         timeout=timedelta(seconds=seconds),working_directory=cwd,envs=env)),seconds+10)
                     receipt=service.output(output)
+                    if argv[:2]==['sh','-c'] and 'codex' in argv[2]:
+                        model_quiescent=True
                     for key in ['stdout','stderr','error']:
                         if isinstance(receipt.get(key),str):receipt[key]=runtime.redact(receipt[key])
                     if receipt['exit_code']!=0 or receipt.get('error'):raise RuntimeError('guest command failed: '+(receipt.get('stderr') or receipt.get('stdout') or str(receipt.get('error')))[:1800])
+                    if full_stdout_limit is not None:
+                        # CLI help is a trusted guest probe. Ordinary receipts stay diagnostic-sized.
+                        chunks=[];size=0
+                        for log in output.logs.stdout:
+                            piece=log.text
+                            size+=len(piece.encode('utf-8'))+(1 if chunks else 0)
+                            if size>full_stdout_limit:raise RuntimeError('guest Codex help exceeds 16 KiB')
+                            chunks.append(piece)
+                        receipt['stdout']=runtime.redact('\n'.join(chunks))
                     return receipt
                 await command(['mkdir','-p','/workspace/work','/workspace/result','/workspace/codex-home','/workspace/home'],cwd='/')
+                if durable and durable['checkpoint'] is not None:
+                    from .durable_archive import validate_checkpoint
+                    validate_checkpoint(durable['checkpoint'],session_id=durable['session_id'],
+                                        known_tokens=(runtime.access_token,runtime.tool_access_token))
+                    await sandbox.files.write_file('/workspace/checkpoint.tar.gz',durable['checkpoint'],mode=600)
+                    await command(['tar','-xzf','/workspace/checkpoint.tar.gz','-C','/workspace'])
                 if self.hosts:
                     lines=''.join(ip+' '+host+'\n' for host,ip in sorted(self.hosts.items()))
                     await command(['python','-c','from pathlib import Path; p=Path("/etc/hosts"); p.open("a").write('+repr(lines)+')'])
@@ -156,10 +245,18 @@ class CodexTaskExecutor:
                           '-c','model_providers.task.env_key="CHATTASK_CODEX_API_KEY"',
                           '-c','model_providers.task.base_url='+json.dumps(runtime.base_url),
                           '-c','model_providers.task.request_max_retries=1','-c','model_providers.task.stream_max_retries=1',
-                          '-c','model_reasoning_effort="xhigh"','exec','--skip-git-repo-check','--sandbox','danger-full-access',
-                          '--model',runtime.model,'--cd','/workspace/work','--json','--output-last-message','/workspace/agent-final.md','-']
+                          '-c','model_reasoning_effort="xhigh"']
+                    if durable and durable['session_id']:
+                        help_text=(await command(['codex','exec','resume','--help'],full_stdout_limit=16*1024))['stdout']
+                        root_help=(await command(['codex','--help'],full_stdout_limit=16*1024))['stdout']
+                        argv=native_resume_argv(argv,runtime.model,durable['session_id'],help_text,root_help)
+                    else:
+                        argv+=['exec','--skip-git-repo-check','--sandbox','danger-full-access',
+                               '--model',runtime.model,'--cd','/workspace/work','--json',
+                               '--output-last-message','/workspace/agent-final.md','-']
                     shell=shlex.join(argv)+' < /workspace/task-prompt.txt > /workspace/agent-events.jsonl 2> /workspace/agent-stderr.txt'
                     await command(['sh','-c',shell],seconds=runtime.seconds)
+                    model_quiescent=True
                     events=runtime.redact(await sandbox.files.read_file('/workspace/agent-events.jsonl'))
                     session=None;completed=False;failed=False
                     for line in events.splitlines():
@@ -170,11 +267,14 @@ class CodexTaskExecutor:
                             if event.get('type')=='turn.failed':failed=True
                         except ValueError:pass
                     outcome['codex_session_id']=session
+                    if durable and durable['session_id'] and session!=durable['session_id']:
+                        raise RuntimeError('native resumed thread id changed')
                     # Preserve the native transcript even if action/readiness verification fails.
                     self._artifact(outcome,'codex.events.jsonl',events.encode()[:1024*1024])
                     final=runtime.redact(await sandbox.files.read_file('/workspace/agent-final.md'))
                     marker=await sandbox.files.read_file('/workspace/agent-started.txt')
                     if not session or not completed or failed or not marker.strip() or not final.strip():raise RuntimeError('Codex execution did not meet the native completion/write contract')
+                    outcome['native_turn_completed']=True
                     if cancelled():raise RuntimeError('task cancellation requested')
                     outcome['final']=final[:16000]
                     self._artifact(outcome,'result.md',final.encode()[:1000000])
@@ -197,11 +297,38 @@ class CodexTaskExecutor:
                         if any(secret and (secret.encode() in body or base64.b64encode(secret.encode()) in body) for secret in (runtime.access_token,runtime.tool_access_token)):raise RuntimeError('task credential appeared in results')
                 self._artifact(outcome,'result.tar.gz',data)
                 await update({'index':1 if mode=='verify' else 2,'status':'passed','receipt':json.loads(collection['stdout'])})
+                if durable:
+                    from .durable_archive import CAPTURE_SCRIPT,validate_checkpoint
+                    await sandbox.files.write_file('/workspace/capture_checkpoint.py',CAPTURE_SCRIPT,mode=600)
+                    await command(['python','/workspace/capture_checkpoint.py'])
+                    checkpoint_data=await sandbox.files.read_bytes('/workspace/checkpoint.tar.gz')
+                    validate_checkpoint(checkpoint_data,known_tokens=(runtime.access_token,runtime.tool_access_token),
+                                        session_id=outcome['codex_session_id'])
+                    await durable['save_checkpoint'](checkpoint_data,outcome['codex_session_id'])
                 if mode=='verify':
                     outcome['final']='Read-only trusted publication verification passed.'
                 outcome['ok']=True
             except Exception as exc:
                 outcome['error']=runtime.redact(str(exc))[:1800]
+                if durable and not gateway_intent and lease is None and sandbox is None and not sandbox_create_attempted:
+                    outcome['cleanup']={'not_created':True,'container_absent':True}
+                    outcome['credential_closure']={'not_created':True}
+                if durable and model_quiescent and sandbox is not None and not outcome.get('codex_session_id'):
+                    try:
+                        partial=await sandbox.files.read_file('/workspace/agent-events.jsonl')
+                        for line in partial.splitlines():
+                            event=json.loads(line)
+                            if event.get('type')=='thread.started':outcome['codex_session_id']=event.get('thread_id')
+                    except Exception:pass
+                if durable and model_quiescent and sandbox is not None and outcome.get('codex_session_id') and not any(a['name']=='result.tar.gz' for a in outcome['artifacts']):
+                    try:
+                        from .durable_archive import CAPTURE_SCRIPT,validate_checkpoint
+                        await sandbox.files.write_file('/workspace/capture_checkpoint.py',CAPTURE_SCRIPT,mode=600)
+                        await command(['python','/workspace/capture_checkpoint.py'])
+                        checkpoint_data=await sandbox.files.read_bytes('/workspace/checkpoint.tar.gz')
+                        validate_checkpoint(checkpoint_data,known_tokens=(runtime.access_token,runtime.tool_access_token),session_id=outcome['codex_session_id'])
+                        await durable['save_checkpoint'](checkpoint_data,outcome['codex_session_id'])
+                    except Exception:pass
                 if sandbox is not None and mode!='verify':
                     if not any(a['name']=='codex.events.jsonl' for a in outcome['artifacts']):
                         try:
@@ -217,7 +344,7 @@ class CodexTaskExecutor:
                         outcome['cleanup']={'requested':True,'container_absent':not any(c.name=='sandbox-'+sandbox.id for c in service.docker.containers.list(all=True))}
                     except Exception:outcome['cleanup']={'requested':True,'container_absent':False}
                     if not outcome['cleanup']['container_absent']:outcome['ok']=False
-                if lease is not None:
+                if lease is not None or gateway_intent:
                     try:
                         closed=await asyncio.to_thread(self.gateway.close,task['id'])
                         if closed!={'closed':True}:raise ValueError('lease closure unconfirmed')

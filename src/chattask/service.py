@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 import docker
 import httpx
 from opensandbox import Sandbox
+from opensandbox.manager import SandboxManager
+from opensandbox.models.sandboxes import SandboxFilter
 from opensandbox.config import ConnectionConfig
 from opensandbox.models import WriteEntry
 from .settings import TaskSettings
@@ -60,9 +62,50 @@ class TaskService:
                 'pids_limit': h['PidsLimit'], 'privileged': h['Privileged'],
                 'mount_count': len(attrs['Mounts'])}
 
-    async def create(self, *, ttl_seconds: int = 600) -> tuple[Sandbox, ConnectionConfig, dict]:
+    async def find_run_sandboxes(self, run_id: str) -> list[str]:
+        """Read controller metadata for a durable Run; any uncertain list fails closed."""
+        if not isinstance(run_id, str) or len(run_id) != 32 or any(c not in '0123456789abcdef' for c in run_id):
+            raise ValueError('invalid durable Run id')
+        cfg = self.connection()
+        manager = None
+        try:
+            manager = await SandboxManager.create(connection_config=cfg)
+            found = []
+            inventory = {}
+            total = None
+            for page in range(1, 101):
+                result = await manager.list_sandbox_infos(SandboxFilter(page=page, page_size=100))
+                if total is None:
+                    total = result.pagination.total_items
+                if result.pagination.page != page or result.pagination.total_items != total or total > 10000 or (result.pagination.has_next_page and not result.sandbox_infos):
+                    raise RuntimeError('sandbox inventory ambiguous')
+                for info in result.sandbox_infos:
+                    if info.id in inventory:
+                        raise RuntimeError('duplicate sandbox inventory identity')
+                    inventory[info.id] = info.metadata or {}
+                    if info.metadata and info.metadata.get('purpose') == 'chattask' and info.metadata.get('durable_run_id') == run_id:
+                        found.append(info.id)
+                if not result.pagination.has_next_page:
+                    if not found:
+                        # A controller that drops metadata cannot prove absence when a
+                        # Docker Sandbox remains. Keep the fence until it is resolved.
+                        for container in self.docker.containers.list(all=True):
+                            if container.name.startswith('sandbox-'):
+                                metadata = inventory.get(container.name.removeprefix('sandbox-'))
+                                if metadata is None or not metadata.get('durable_run_id'):
+                                    raise RuntimeError('sandbox ownership metadata unavailable')
+                    return found
+            raise RuntimeError('sandbox inventory too large')
+        finally:
+            if manager is not None:
+                await manager.close()
+            await cfg.transport.aclose()
+
+    async def create(self, *, ttl_seconds: int = 600, durable_run_id: str | None = None) -> tuple[Sandbox, ConnectionConfig, dict]:
         if type(ttl_seconds) is not int or not 60 <= ttl_seconds <= 7200:
             raise ValueError('sandbox lifetime must be 60–7200 seconds')
+        if durable_run_id is not None and (not isinstance(durable_run_id, str) or len(durable_run_id) != 32 or any(c not in '0123456789abcdef' for c in durable_run_id)):
+            raise ValueError('invalid durable Run id')
         cfg = self.connection()
         sandbox = None
         try:
@@ -70,7 +113,7 @@ class TaskService:
                 self.settings.image, entrypoint=['/bin/sh', '-c', 'sleep '+str(ttl_seconds)],
                 timeout=timedelta(seconds=ttl_seconds), ready_timeout=timedelta(seconds=35),
                 resource={'cpu': '1', 'memory': '512Mi'},
-                metadata={'purpose': 'chattask'},
+                metadata={'purpose': 'chattask', **({'durable_run_id': durable_run_id} if durable_run_id else {})},
                 connection_config=cfg,
             )
             details = self.inspect_owned(sandbox.id)

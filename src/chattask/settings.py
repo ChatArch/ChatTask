@@ -4,6 +4,7 @@ from dataclasses import dataclass,field
 from pathlib import Path
 import hashlib
 import io
+import json
 import re
 import tarfile
 import os
@@ -31,6 +32,9 @@ class TaskSettings:
     origin: str='http://127.0.0.1:8000'
     username: str=''
     password: str=field(default='',repr=False)
+    login_users_json: str=field(default='',repr=False)
+    research_container: str=''
+    research_origin: str=''
     image: str='python:3.10-slim'
     home: str | Path | None=None
     tool_profile: str='task-tools'
@@ -56,6 +60,35 @@ class TaskSettings:
             raise ValueError('OpenSandbox API key is required')
         if not isinstance(self.image,str) or not self.image or len(self.image)>256:
             raise ValueError('Invalid workload image')
+        if not isinstance(self.login_users_json,str) or len(self.login_users_json)>16384:
+            raise ValueError('invalid optional login users JSON')
+        if self.login_users_json:
+            try: users=json.loads(self.login_users_json)
+            except ValueError as exc:raise ValueError('invalid optional login users JSON') from exc
+            if not isinstance(users,list) or len(users)>8:
+                raise ValueError('optional login users must be a bounded list')
+            names={self.username};principals={'site-operator'}
+            for user in users:
+                if not isinstance(user,dict) or set(user)!={'username','password','principal_id','display_name'}:
+                    raise ValueError('invalid optional login user')
+                name=user['username'];ident=user['principal_id'];display=user['display_name'];password=user['password']
+                if not isinstance(name,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._@-]{0,99}',name) or name in names:
+                    raise ValueError('duplicate or invalid login username')
+                if not isinstance(ident,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._@-]{0,99}',ident) or ident in principals:
+                    raise ValueError('duplicate or invalid login principal')
+                if not isinstance(display,str) or not 1<=len(display)<=80 or not isinstance(password,str) or len(password)<8:
+                    raise ValueError('invalid optional login user display or password')
+                names.add(name);principals.add(ident)
+        if not isinstance(self.research_container,str) or not isinstance(self.research_origin,str):
+            raise ValueError('Research container and HTTPS origin must be strings')
+        if bool(self.research_container)!=bool(self.research_origin):
+            raise ValueError('Research container and HTTPS origin must be configured together')
+        if self.research_container:
+            if not isinstance(self.research_container,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',self.research_container):
+                raise ValueError('invalid Research container')
+            if not isinstance(self.research_origin,str) or not self.research_origin.startswith('https://'):
+                raise ValueError('Research requires HTTPS origin')
+            object.__setattr__(self,'research_origin',_origin(self.research_origin))
         if not isinstance(self.workspace_key,str) or self.workspace_key and not 32 <= len(self.workspace_key.encode('utf-8')) <= 512:
             raise ValueError('Workspace integration key must be empty or at least 32 bytes')
         if not isinstance(self.analysis_profile,str) or self.analysis_profile and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}',self.analysis_profile):
@@ -120,7 +153,11 @@ def load_settings(*,profile: str | None=None,home: str | Path | None=None,overri
         if not resolved.get(key):raise ValueError('Missing ChatTask configuration: '+key)
     return TaskSettings(endpoint=resolved['CHATTASK_SANDBOX_ENDPOINT'],api_key=resolved['CHATTASK_SANDBOX_API_KEY'],
                         origin=resolved['CHATTASK_WEB_ORIGIN'],username=resolved.get('CHATTASK_LOGIN_USERNAME') or '',
-                        password=resolved.get('CHATTASK_LOGIN_PASSWORD') or '',image=resolved['CHATTASK_IMAGE'],home=home,
+                        password=resolved.get('CHATTASK_LOGIN_PASSWORD') or '',
+                        login_users_json=resolved.get('CHATTASK_LOGIN_USERS_JSON') or '',
+                        research_container=resolved.get('CHATTASK_RESEARCH_OVERLEAF_CONTAINER') or '',
+                        research_origin=resolved.get('CHATTASK_RESEARCH_OVERLEAF_ORIGIN') or '',
+                        image=resolved['CHATTASK_IMAGE'],home=home,
                         tool_profile=resolved['CHATTASK_TOOL_PROFILE'],
                         public_deps_path=resolved.get('CHATTASK_PUBLIC_DEPS_PATH') or '',
                         public_deps_sha256=resolved.get('CHATTASK_PUBLIC_DEPS_SHA256') or '',

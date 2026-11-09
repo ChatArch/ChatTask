@@ -136,6 +136,7 @@ controls(false);
     controls(false);
     await initializeTemplates();
     await initializeAgentTasks();
+    await initializeDurableTasks();
     await initializePackages();
     const workspaceId = new URLSearchParams(location.search).get('workspace_task');
     if (workspaceId && /^[0-9a-f]{32}$/.test(workspaceId)) {
@@ -158,6 +159,7 @@ function clearTemplateState() {
   clearWorkspaceState();
   clearAgentState();
   clearPackageState();
+  clearDurableState();
   templates = []; repositories = []; selectedRun = null; pendingCreate = null;
   sessionStorage.removeItem('chattask-pending-run');
   if (refreshTimer) clearTimeout(refreshTimer);
@@ -188,6 +190,8 @@ function approvalPhrase(run) { return `TAG ${run.github_repo} v${run.version}`; 
 function selectTab(key) {
   $('agent-view').hidden = key !== 'agent';
   $('agent-tab').setAttribute('aria-selected', String(key === 'agent'));
+  $('durable-view').hidden = key !== 'durable';
+  $('durable-tab').setAttribute('aria-selected', String(key === 'durable'));
   $('package-view').hidden = key !== 'package';
   $('package-tab').setAttribute('aria-selected', String(key === 'package'));
   $('template-view').hidden = key !== 'templates';
@@ -198,9 +202,163 @@ function selectTab(key) {
   $('workspace-tab').setAttribute('aria-selected', String(key === 'workspace'));
 }
 $('agent-tab').addEventListener('click', () => selectTab('agent'));
+$('durable-tab').addEventListener('click', () => selectTab('durable'));
 $('package-tab').addEventListener('click', () => selectTab('package'));
 $('templates-tab').addEventListener('click', () => selectTab('templates'));
 $('sandbox-tab').addEventListener('click', () => selectTab('sandbox'));
+
+// Long-term Tasks are queued here; execution belongs to the independent worker.
+let durableSelected = null;
+let durableCreateRequest = null;
+let durableResumeRequest = null;
+function clearDurableState() {
+  durableSelected = null; durableCreateRequest = null; durableResumeRequest = null;
+  $('durable-history').replaceChildren(option('', '选择任务'));
+  $('durable-runs').replaceChildren();
+  $('durable-checkpoint').textContent = '';
+  $('durable-project').replaceChildren();
+  $('durable-worker-state').textContent = '';
+  $('durable-state').textContent = '';
+  $('durable-followup').value = '';
+  $('durable-ack').checked = false;
+}
+async function initializeDurableTasks() {
+  try {
+    const [images, history, queue] = await Promise.all([request('/api/agent/images'), request('/api/durable/tasks'), request('/api/durable/worker-state')]);
+    renderDurableWorkerState(queue);
+    $('durable-image').replaceChildren(...images.images.map(i => option(i.id, i.id)));
+    $('durable-create').disabled = !images.images.length;
+    if (!images.images.length) show('durable-create-state', '未配置可用镜像或模型网关。', true);
+    renderDurableHistory(history.tasks);
+    if (history.tasks.length) await loadDurable(history.tasks[0].id);
+  } catch (e) { show('durable-create-state', e.message, true); }
+}
+function renderDurableWorkerState(queue) {
+  $('durable-worker-state').textContent = !queue.configured ? '长期任务执行配置不可用。' :
+    queue.reconciliation_required ? `队列已停在安全核对点：${queue.reconciliation_required} 个旧轮次仍需确认容器与网关租约。` :
+    `待处理轮次 ${queue.pending}；此视图不表示独立 worker 已在线。`;
+}
+function renderDurableHistory(tasks) {
+  const picker = $('durable-history');
+  const old = durableSelected && durableSelected.id;
+  picker.replaceChildren(option('', '选择任务'));
+  tasks.forEach(t => picker.append(option(t.id, `${t.goal.slice(0, 45)} · ${t.workflow || 'development'} · ${t.status}`)));
+  if (old && tasks.some(t => t.id === old)) picker.value = old;
+}
+async function loadDurable(id) {
+  if (!id) { durableSelected = null; show('durable-state', '选择长期任务查看。'); return; }
+  try {
+    const [task, history] = await Promise.all([request(`/api/durable/tasks/${id}`), request(`/api/durable/tasks/${id}/runs`)]);
+    durableSelected = task;
+    $('durable-history').value = id;
+    const status = task.status === 'queued' ? '已排队 · 等待独立 worker' :
+      task.status === 'running' && task.pause_requested ? '运行中 · 已请求本轮结束后暂停' :
+      task.status === 'waiting_input' ? '本轮完成 · 等待追加要求' :
+      task.status === 'blocked' ? '已阻塞 · 检查失败或未知副作用后手动处理' : task.status;
+    show('durable-state', `${status} · ${task.goal}`);
+    $('durable-checkpoint').textContent = task.checkpoint ?
+      `已验证检查点 · SHA256 ${task.checkpoint.sha256} · ${task.checkpoint.size} 字节` : '尚无已验证检查点';
+    const project = $('durable-project'); project.replaceChildren();
+    if (task.workflow === 'research' && task.research_project_url) {
+      const link = document.createElement('a');
+      link.href = task.research_project_url; link.textContent = '打开原 Overleaf 工程';
+      link.target = '_blank'; link.rel = 'noopener noreferrer'; project.append(link);
+    }
+    const list = $('durable-runs'); list.replaceChildren();
+    history.runs.forEach(run => {
+      const item = document.createElement('li');
+      const summary = document.createElement('div');
+      summary.textContent = `第 ${run.number} 轮 · ${run.status} · ${run.actor} · ${run.instructions}`;
+      item.append(summary);
+      if (run.result || run.error) {
+        const note = document.createElement('pre'); note.textContent = run.result || run.error; item.append(note);
+      }
+      if (run.unknown_side_effects) {
+        const warning = document.createElement('p'); warning.textContent = '执行器中断；外部副作用未知，检查后才能明确确认接续。'; item.append(warning);
+      }
+      (run.artifacts || []).forEach(artifact => {
+        const link = document.createElement('a');
+        link.href = `/api/durable/tasks/${id}/runs/${run.id}/artifacts/${encodeURIComponent(artifact.name)}`;
+        link.textContent = `${artifact.name} · ${artifact.size} 字节`;
+        item.append(link);
+      });
+      list.append(item);
+    });
+    const latest = history.runs.at(-1);
+    $('durable-reconcile').hidden = !(task.workflow === 'research' && latest && latest.research_outcome_unknown);
+    $('durable-resume').disabled = ['queued', 'running', 'reconciling'].includes(task.status) || !!(latest && latest.research_outcome_unknown);
+    $('durable-pause').disabled = !['queued', 'running'].includes(task.status);
+    $('durable-complete').disabled = ['queued', 'running', 'reconciling'].includes(task.status);
+  } catch (e) { show('durable-state', e.message, true); }
+}
+$('durable-history').addEventListener('change', e => loadDurable(e.target.value));
+$('durable-refresh').addEventListener('click', async () => {
+  try { const [history, queue] = await Promise.all([request('/api/durable/tasks'), request('/api/durable/worker-state')]); renderDurableHistory(history.tasks); renderDurableWorkerState(queue); if (durableSelected) await loadDurable(durableSelected.id); }
+  catch (e) { show('durable-state', e.message, true); }
+});
+$('durable-goal').addEventListener('input', () => { durableCreateRequest = null; });
+$('durable-workflow').addEventListener('change', () => {
+  durableCreateRequest = null;
+  $('durable-sources-box').hidden = $('durable-workflow').value !== 'research';
+});
+$('durable-sources').addEventListener('input', () => { durableCreateRequest = null; durableResumeRequest = null; });
+$('durable-auto-source').addEventListener('change', () => {
+  durableCreateRequest = null;
+  $('durable-auto-box').hidden = !$('durable-auto-source').checked;
+  $('durable-manual-box').hidden = $('durable-auto-source').checked;
+});
+$('durable-query').addEventListener('input', () => { durableCreateRequest = null; });
+$('durable-followup').addEventListener('input', () => { durableResumeRequest = null; });
+$('durable-create').addEventListener('click', async () => {
+  const instructions = $('durable-goal').value.trim();
+  if (!instructions) return show('durable-create-state', '请输入目标。', true);
+  durableCreateRequest ||= crypto.randomUUID();
+  try {
+    const workflow = $('durable-workflow').value;
+    const body = {request_id: durableCreateRequest, instructions, image_profile: $('durable-image').value, workflow};
+    const auto = workflow === 'research' && $('durable-auto-source').checked;
+    if (workflow === 'research' && !auto) body.source_records = JSON.parse($('durable-sources').value);
+    if (auto) { body.query = $('durable-query').value.trim(); body.max_results = 3; delete body.workflow; }
+    const task = await request(auto ? '/api/durable/research/auto' : '/api/durable/tasks', 'POST', body);
+    durableCreateRequest = null;
+    show('durable-create-state', auto ? '摘要来源已自动发现并保存；请核对相关性。研究任务已排队。' : '任务已排队，等待独立 worker。');
+    const history = await request('/api/durable/tasks'); renderDurableHistory(history.tasks); await loadDurable(task.id);
+  } catch (e) { show('durable-create-state', e.message, true); }
+});
+$('durable-resume').addEventListener('click', async () => {
+  if (!durableSelected) return;
+  const instructions = $('durable-followup').value.trim();
+  if (!instructions) return show('durable-state', '请输入本轮追加要求。', true);
+  durableResumeRequest ||= crypto.randomUUID();
+  try {
+    const body = {
+      request_id: durableResumeRequest, instructions, acknowledge_unknown: $('durable-ack').checked};
+    if (durableSelected.workflow === 'research' && $('durable-sources').value.trim()) {
+      body.source_records = JSON.parse($('durable-sources').value);
+    }
+    await request(`/api/durable/tasks/${durableSelected.id}/resume`, 'POST', body);
+    durableResumeRequest = null; $('durable-ack').checked = false;
+    await loadDurable(durableSelected.id);
+  } catch (e) { show('durable-state', e.message, true); }
+});
+for (const action of ['pause', 'complete']) {
+  $(`durable-${action}`).addEventListener('click', async () => {
+    if (!durableSelected) return;
+    try {
+      await request(`/api/durable/tasks/${durableSelected.id}/${action}`, 'POST', {request_id: crypto.randomUUID()});
+      await loadDurable(durableSelected.id);
+    } catch (e) { show('durable-state', e.message, true); }
+  });
+}
+$('durable-reconcile').addEventListener('click', async () => {
+  if (!durableSelected) return;
+  if (!$('durable-ack').checked) return show('durable-state', '请先检查原工程并勾选未知副作用确认。', true);
+  try {
+    await request(`/api/durable/tasks/${durableSelected.id}/reconcile-research`, 'POST',
+      {request_id: crypto.randomUUID(), acknowledge_unknown: true});
+    await loadDurable(durableSelected.id);
+  } catch (e) { show('durable-state', e.message, true); }
+});
 
 async function initializeTemplates() {
   try {

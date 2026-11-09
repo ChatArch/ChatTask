@@ -595,6 +595,16 @@
 <td>同 UID 信任；中断不自动重放；不是分布式队列</td>
 </tr>
 <tr>
+<td>长期 Task 候选</td>
+<td>稳定身份、逐轮历史、单写者 worker、受限检查点和原生会话接续</td>
+<td><a href="../tasks/#长期任务候选">阶段边界暂停、失败需人工核对</a>；生产部署须单独验收</td>
+</tr>
+<tr>
+<td>研究轮次候选</td>
+<td>可选自动检索 arXiv 摘要或使用已核验来源；原生 Codex 生成自包含 TeX，受信 worker 发布原 Overleaf 并回读 PDF/源码</td>
+<td>自动检索不读全文、不保证相关性；原服务由运维配置，未知写入显式同操作核对</td>
+</tr>
+<tr>
 <td>Sandbox 预检</td>
 <td>跟踪源码归档、真实测试/构建/Twine 检查、wheel/sdist 读回与 SHA256、销毁核验</td>
 <td>项目代码仅在 Sandbox；600 秒后端 TTL，步骤与总时限有限</td>

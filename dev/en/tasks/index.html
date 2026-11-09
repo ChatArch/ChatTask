@@ -411,6 +411,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#long-term-task-candidate" class="md-nav__link">
+    <span class="md-ellipsis">
+      Long-term Task candidate
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#configuration-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       Configuration boundary
@@ -648,6 +657,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#long-term-task-candidate" class="md-nav__link">
+    <span class="md-ellipsis">
+      Long-term Task candidate
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#configuration-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       Configuration boundary
@@ -732,6 +750,12 @@
 
 
 <h1 id="generic-tasks-and-images">Generic tasks and images<a class="headerlink" href="#generic-tasks-and-images" title="Permanent link">&para;</a></h1>
+<h2 id="long-term-task-candidate">Long-term Task candidate<a class="headerlink" href="#long-term-task-candidate" title="Permanent link">&para;</a></h2>
+<p>Long-term Tasks are separate from one-shot <code>chattask run</code>. <code>POST /api/durable/tasks</code> accepts <code>request_id</code>, <code>instructions</code> and <code>image_profile</code>; the authenticated principal becomes owner. <code>GET /api/durable/tasks</code>, <code>/{id}</code> and <code>/{id}/runs</code> return private history. <code>POST /{id}/resume</code> accepts a new <code>request_id</code>, <code>instructions</code> and optional <code>acknowledge_unknown=true</code>; <code>POST /{id}/pause</code> and <code>/{id}/complete</code> accept <code>request_id</code>. Owner-only <code>POST /{id}/members</code> grants a named principal <code>viewer</code> or <code>editor</code>. <code>GET /{id}/runs/{run_id}/artifacts/{name}</code> checks access and SHA256. These paths all start with <code>/api/durable/tasks</code>, and writes use the existing site CSRF protection. Equal repeated request IDs return the same result; changed input conflicts. An active round cannot be resumed again.</p>
+<p>Creation defaults to <code>workflow=development</code>. Research either sets <code>workflow=research</code> with 1–12 caller-verified <code>source_records</code>, or uses authenticated <code>POST /api/durable/research/auto</code> with <code>request_id</code>, <code>instructions</code>, <code>image_profile</code>, plain-text <code>query</code> and optional <code>max_results</code> (1–5). The latter retrieves and persists real arXiv Atom abstracts on the Task. <strong>This is abstract-only discovery; it does not imply full-paper reading or relevance review.</strong> Later rounds can supply new records or inherit the prior set. The model must write <code>/workspace/result/research/main.tex</code> as self-contained <code>ctexart</code>/xelatex with inline bibliography; <code>references.bib</code>, report and source metadata may accompany it. The trusted worker reads only that round's result archive and never accepts browser-selected container, project, user, path or command. <code>ResearchPublisher</code> binds the original Overleaf project to the Task; actual PDF and source readback become <code>research.pdf</code> and <code>research-source.zip</code> on the same Run, with native receipt and project link. Compile, sync and conflict failures stay blocked. After inspecting an unknown external outcome, <code>POST /{id}/reconcile-research</code> with a new <code>request_id</code> and <code>acknowledge_unknown=true</code> enqueues same-Run publication reconciliation without rerunning Codex.</p>
+<p>The bridge is enabled only when both <code>CHATTASK_RESEARCH_OVERLEAF_CONTAINER</code> and HTTPS <code>CHATTASK_RESEARCH_OVERLEAF_ORIGIN</code> are configured. Development tasks need neither. Optional sensitive <code>CHATTASK_LOGIN_USERS_JSON</code> contains at most eight records with <code>username</code>, <code>password</code>, <code>principal_id</code>, <code>display_name</code>, verified by shared ChatLogin. The original site-operator username/password and <code>site-operator</code> principal remain; principal IDs must be unique. Do not add test accounts to production. Operators supply configuration, never browsers.</p>
+<p>Web only enqueues. Run <code>chattask worker --env-profile site --operator operator</code> independently, with <code>--once</code> to process at most one round. Trusted local CLI uses <code>chattask task create/list/show/resume/pause/complete</code> with explicit <code>--owner</code> and <code>--env-profile</code>. The worker needs the existing model gateway, OpenSandbox and registered image. One process holds a native flock; after a worker crash, an active round becomes interrupted and possible external writes require inspection. The queue never replays it automatically. Web restart does not cancel the worker.</p>
+<p>Each new Sandbox round checkpoints bounded <code>/workspace/work</code>, <code>/workspace/result</code> and <code>$CODEX_HOME/sessions</code>; links, traversal, special files, secret-looking paths, excess content and known short-lived credentials are rejected. A successful round requires native session ID, <code>turn.completed</code>, a verified checkpoint, container cleanup and gateway lease closure. A later round uses exact-session <code>codex exec resume</code> after checking supported flags in the guest. Pause is cooperative at the round boundary: queued work can pause before start, running work finishes its round first. Failed or interrupted rounds require explicit inspection; an initial failure without a checkpoint remains blocked. Production readiness is established only by the deployed image, gateway, original service and browser acceptance.</p>
 <div class="grid cards">
 <ul>
 <li><strong>Task</strong>: instructions, acceptance criteria, stable request identity and a registered image profile. A verified prior result can be selected as input.</li>

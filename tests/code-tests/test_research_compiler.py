@@ -131,6 +131,10 @@ def test_bridge_publishes_source_only_then_returns_isolated_pdf_receipt(tmp_path
     bridge = DockerOverleafBridge('original-service','https://example.org',compiler=Compiler())
     def native(payload, *, on_start=None, on_exit=None):
         actions.append(payload['action'])
+        if payload['action'] == 'readback':
+            return {'status':'ok','project_exists':True,'project_id':'c'*24,'owner_verified':True,
+                    'root_doc_id':'d'*24,'round_root_doc_id':'d'*24,'source_files':{'main.tex':MAIN},
+                    'missing_files':[],'provenance':'original-service-document-readback'}
         assert payload['action'] == 'publish_source'
         if on_start: on_start(12345,'synthetic-process-identity')
         if on_exit: on_exit(12345,'synthetic-process-identity',0,{'status':'ok'})
@@ -140,9 +144,37 @@ def test_bridge_publishes_source_only_then_returns_isolated_pdf_receipt(tmp_path
                 'provenance':'original-service-document-readback'}
     bridge._native_call = native
     result = ResearchPublisher(tmp_path/'state',bridge).publish(TASK,RUN,{'main.tex':MAIN},'request-1')
-    assert actions == ['preflight','publish_source','isolated-compile']
+    assert actions == ['preflight','publish_source','isolated-compile','readback']
     assert result.receipt['isolated_compiler']['image_id'] == IMAGE
     assert result.pdf_bytes.startswith(b'%PDF-')
+
+
+@pytest.mark.parametrize('changed', ['source', 'root'])
+def test_bridge_rejects_original_service_edit_during_isolated_compile(tmp_path, changed):
+    class Compiler:
+        def prepare(self): return {'synthetic':True}
+        def compile(self, *args):
+            return b'%PDF-1.7\n' + b'x'*30, {
+                'image_id':IMAGE, 'engine':'/public/tex/xelatex',
+                'container_id':'d'*64, 'nonce':'e'*32, 'passes':2,
+                'pdf_sha256':hashlib.sha256(b'%PDF-1.7\n'+b'x'*30).hexdigest(),
+                'isolation':'no-network-read-only-rootfs-task-mounts'}
+    bridge = DockerOverleafBridge('original-service','https://example.org',compiler=Compiler())
+    def native(payload, **kwargs):
+        if payload['action']=='publish_source':
+            return {'status':'ok','owner_verified':True,'project_id':'c'*24,
+                    'root_doc_id':'d'*24,'previous_root_doc_id':None,'compiler':'xelatex',
+                    'source_files':{f'r_{RUN}_main.tex':MAIN},
+                    'provenance':'original-service-document-readback'}
+        assert payload['action']=='readback'
+        return {'status':'ok','project_exists':True,'project_id':'c'*24,'owner_verified':True,
+                'root_doc_id':('f'*24 if changed=='root' else 'd'*24),
+                'round_root_doc_id':'d'*24,'source_files':{'main.tex':MAIN+' human edit' if changed=='source' else MAIN},
+                'missing_files':[],'provenance':'original-service-document-readback'}
+    bridge._native_call = native
+    from chattask.research import ResearchConflict
+    with pytest.raises(ResearchConflict):
+        ResearchPublisher(tmp_path/'state',bridge).publish(TASK,RUN,{'main.tex':MAIN},'request-1')
 
 
 def test_compiler_cleanup_uncertainty_fails_closed(tmp_path):

@@ -26,7 +26,7 @@ Documentation = "https://arch.gh.wzhecnu.cn/ChatTask/"
 chattask = "chattask.cli:main"
 
 [project.optional-dependencies]
-dev = ["build", "pytest", "twine"]
+dev = ["build", "setuptools>=61.0", "wheel", "pytest", "twine"]
 web = ["fastapi>=0.133,<0.143", "uvicorn>=0.41,<0.55", "ChatLogin[web]>=0.2.0,<0.3.0", "ChatPyPI>=0.2.14,<0.3.0", "ChatGH>=0.2.14,<0.3.0"]
 docs = ["mkdocs>=1.6,<2.0", "mkdocs-material>=9.5,<9.7", "mkdocs-static-i18n>=1.2,<2.0", "mike>=2.0,<3.0"]
 

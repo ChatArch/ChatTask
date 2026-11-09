@@ -261,6 +261,22 @@ class DockerOverleafBridge:
         if result.get('source_files') != expected:
             raise ResearchConflict('original service document readback differs')
         pdf, build = self.compiler.compile(payload['task_id'], run_id, payload['files'], plan)
+        # A collaborator may edit the original project while the isolated
+        # compiler runs. Bind success to a fresh original-service snapshot.
+        fresh = self._native_call({'action':'readback', 'task_id':payload['task_id'],
+                                  'run_id':run_id, 'project_id':result.get('project_id'),
+                                  'file_sha256':{name:_digest(body.encode())
+                                                 for name,body in payload['files'].items()}})
+        if (not isinstance(fresh,dict) or fresh.get('status')!='ok'
+                or fresh.get('owner_verified') is not True
+                or fresh.get('provenance')!='original-service-document-readback'):
+            raise ResearchUnavailable('post-compile original service readback unavailable')
+        if (fresh.get('project_exists') is not True
+                or fresh.get('project_id')!=result.get('project_id')
+                or fresh.get('root_doc_id')!=result.get('root_doc_id')
+                or fresh.get('round_root_doc_id')!=result.get('root_doc_id')
+                or fresh.get('source_files')!=payload['files'] or fresh.get('missing_files')!=[]):
+            raise ResearchConflict('original service changed during isolated compilation')
         return {**result, 'compile_status':'success', 'build_id':build['nonce'],
                 'pdf_base64':base64.b64encode(pdf).decode(),
                 'isolated_compiler': build}

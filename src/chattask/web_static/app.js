@@ -516,6 +516,7 @@ function renderPythonTaskUnit(draft) {
 }
 
 function clearPackageRendering() {
+  $('durable-package-frozen').hidden = true;
   $('durable-package-purpose').textContent = '';
   $('durable-package-deliverables').replaceChildren();
   $('durable-package-acceptance').replaceChildren();
@@ -530,11 +531,14 @@ function clearPackageRendering() {
 }
 function renderTaskPackage(task, definition, latest) {
   const legacy = definition.legacy;
-  const editable = !legacy && definition.permissions?.edit && !['running', 'reconciling'].includes(task.status);
+  const isCurrent = definition.revision === task.package?.revision;
+  const editable = !legacy && isCurrent && definition.permissions?.edit && !['queued', 'running', 'reconciling'].includes(task.status);
   const reviewable = !legacy && definition.permissions?.review && latest &&
     latest.package_revision === definition.revision && ['completed', 'blocked', 'interrupted'].includes(latest.status);
   show('durable-package-state', legacy ? '旧格式任务 · 原记录保留；没有补造历史测试或评分。' :
-    `规范版本 ${definition.revision.slice(0, 12)} · ${definition.preparation === 'pending' ? '初始化草稿，尚未完成 Agent 准备' : definition.preparation} · 独立验证 ${latest?.evaluation?.status || '未执行'} · 人工验收 ${latest?.review?.decision || '未确认'}`);
+    `规范版本 ${definition.revision.slice(0, 12)} · ${definition.preparation === 'pending' ? '初始化草稿，尚未完成 Agent 准备' : definition.preparation} · 独立验证 ${latest?.evaluation?.status || '未执行'} · 人工验收（本轮冻结版本）${latest?.review?.decision || '未确认'}${task.status === 'queued' ? ' · 已排队；修改前请先暂停，修订后追加新轮次。' : ''}`);
+  $('durable-package-frozen').hidden = !latest?.package_revision || latest.package_revision === task.package?.revision;
+  $('durable-package-frozen').textContent = isCurrent ? '查看本轮冻结规范以验收' : '返回当前任务规范';
   $('durable-package-purpose').textContent = definition.purpose || task.goal;
   const deliverables = $('durable-package-deliverables');
   (definition.deliverables.length ? definition.deliverables : ['尚未明确交付清单，需补充。']).forEach(text => {
@@ -551,7 +555,7 @@ function renderTaskPackage(task, definition, latest) {
   $('durable-package-toml').value = definition.files['task.toml'] || '';
   $('durable-package-instruction').value = definition.files['instruction.md'] || '';
   for (const name of ['toml', 'instruction', 'save', 'cancel']) $('durable-package-' + name).disabled = !editable;
-  $('durable-package-reuse').disabled = legacy;
+  $('durable-package-reuse').disabled = legacy || !isCurrent;
   $('durable-package-review').disabled = !reviewable;
   const link = $('durable-package-export'); link.hidden = legacy;
   if (!legacy) link.href = `/api/durable/tasks/${task.id}/package.zip?revision=${encodeURIComponent(definition.revision)}`;
@@ -564,6 +568,19 @@ function packageRequest(action, payload) {
   durablePackageRequests.set(action, {identity, requestId});
   return {...payload, request_id: requestId};
 }
+$('durable-package-frozen').addEventListener('click', async () => {
+  if (!durableSelected || !durablePackage || !durableLatestRun?.package_revision) return;
+  if (durablePackageDirty && !window.confirm('规范有未保存修改。是否放弃并切换定义版本？')) return;
+  if (durablePackage.revision !== durableSelected.package?.revision) { durablePackageDirty = false; await loadDurable(durableSelected.id); return; }
+  const id = durableSelected.id; const sequence = durableSelectionSequence;
+  const revision = durableLatestRun.package_revision;
+  try {
+    const definition = await request(`/api/durable/tasks/${id}/package?revision=${encodeURIComponent(revision)}`);
+    if (!authenticated || sequence !== durableSelectionSequence || durableSelected?.id !== id) return;
+    durablePackageDirty = false; clearPackageRendering(); durablePackage = definition;
+    renderTaskPackage(durableSelected, definition, durableLatestRun);
+  } catch (error) { if (authenticated && sequence === durableSelectionSequence) show('durable-package-state', error.message, true); }
+});
 $('durable-library-search').addEventListener('input', () => renderDurableHistory(durableLibrary));
 $('durable-package-files').addEventListener('change', async event => {
   const sequence = ++durableImportSequence;

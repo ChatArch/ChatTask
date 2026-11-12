@@ -184,6 +184,7 @@
         </div>
         <div class="package-actions">
           <a id="durable-package-export" class="secondary-action" hidden>下载任务定义包</a>
+          <button id="durable-package-frozen" class="secondary-action" type="button" hidden>查看本轮冻结规范以验收</button>
           <button id="durable-package-reuse" class="secondary-action" type="button" disabled>复用为新任务并排队</button>
         </div>
         <p class="meta-note">任务数据默认私有。定义导出不包含系统凭据、原生会话或检查点；分享前仍需核查任务正文和材料中的个人信息。</p>
@@ -192,7 +193,7 @@
           <label for="durable-package-instruction">instruction.md</label><textarea id="durable-package-instruction" rows="7" disabled></textarea>
           <button id="durable-package-save" class="secondary-action" type="button" disabled>保存规范新版本</button>
           <button id="durable-package-cancel" class="secondary-action" type="button" disabled>取消规范编辑</button>
-          <p class="meta-note">修订不会覆盖已执行轮次的定义。运行中的任务不可修改规范；原有 tests/inputs 文件会随修订保留。</p>
+          <p class="meta-note">修订不会覆盖已入队轮次的定义。排队中请先暂停再修改，并追加新轮次；原有 tests/inputs 文件会随修订保留。</p>
         </details>
         <details><summary>提交本轮人工验收意见（仅任务所有者）</summary>
           <p>请逐项核对上方清单。自动评分不等同于业务接受；勾选表示你已核查对应证据。</p>

@@ -102,7 +102,7 @@ class CodexTaskExecutor:
         self.task_service=task_service;self.runtime=runtime;self.images=dict(runtime.images)
         self.gateway=gateway;self.hosts=hosts or {};self.postprocessors={}
         from .task_verification import SandboxPackageVerifier
-        self.package_verifier = (SandboxPackageVerifier(task_service,runtime,gateway=gateway,hosts=self.hosts)
+        self.package_verifier = (SandboxPackageVerifier(task_service,runtime,gateway=gateway,hosts=self.hosts,seconds=300)
                                  if task_service is not None else None)
 
     def register_postprocessor(self,mode,handler,max_seconds):
@@ -278,7 +278,7 @@ class CodexTaskExecutor:
                             '--output-last-message','/workspace/prepared-definition.json','-']
                         shell=('env -u CHATTASK_TOOL_ACCESS_TOKEN -u CHATTASK_TOOL_BASE_URL '+shlex.join(prep_argv)+
                                ' < /workspace/preparation-prompt.txt > /workspace/preparation-events.jsonl 2> /workspace/preparation-stderr.txt')
-                        await command(['sh','-c',shell],seconds=max(10,min(180,runtime.seconds//3)))
+                        await command(['sh','-c',shell],seconds=max(10,min(450,runtime.seconds//2)))
                         prep_events=runtime.redact(await sandbox.files.read_file('/workspace/preparation-events.jsonl'))
                         self._artifact(outcome,'package-preparation.events.jsonl',prep_events.encode()[:1024*1024])
                         records=[json.loads(line) for line in prep_events.splitlines() if line.strip()]

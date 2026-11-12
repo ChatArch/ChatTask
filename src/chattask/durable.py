@@ -228,8 +228,8 @@ class DurableTaskService:
                 return self.package(actor, ident, saved['revision'])
             if task.get('package', {}).get('revision') != body.get('expected_revision'):
                 raise DurableConflict('task definition revision changed')
-            if task['status'] in ('running', 'reconciling'):
-                raise DurableConflict('cannot revise an executing task')
+            if task['status'] in ('queued', 'running', 'reconciling'):
+                raise DurableConflict('cannot revise a queued or executing round; pause queued work before revising for a new round')
             if len(changes) >= 256:
                 raise ValueError('task definition revision budget reached')
             package = initial_package(task['goal'], self.image_profiles[task['image_profile']], body.get('definition'))
@@ -377,7 +377,7 @@ class DurableTaskService:
                 inputs.append({**entry, 'data': data})
             checked = await self.package_verifier.evaluate(package, inputs, task=task, run=run)
             if checked.get('status') in ('unavailable', 'error'):
-                outcome = {k: checked[k] for k in ('status', 'error', 'cleanup', 'reconciliation_required') if k in checked}
+                outcome = {k: checked[k] for k in ('status', 'error', 'diagnostic', 'cleanup', 'reconciliation_required') if k in checked}
             else:
                 cleanup = checked.get('cleanup', {})
                 if cleanup.get('container_absent') is not True or cleanup.get('credential_closed') is not True:
@@ -445,8 +445,8 @@ class DurableTaskService:
         notes = self._instructions(body.get('notes'))
         with self.store.locked():
             task = self._raw_task(actor, ident, write=True)
-            if not task.get('package') or body.get('expected_revision') != task['package']['revision']:
-                raise DurableConflict('review definition changed')
+            if not task.get('package'):
+                raise DurableConflict('review requires a packaged round')
             if body.get('run_id') != task['latest_run_id']:
                 raise DurableConflict('review must identify the latest round')
             run = self.store.get('durable_runs', body['run_id'])
@@ -454,12 +454,16 @@ class DurableTaskService:
                 raise DurableConflict('review round definition mismatch')
             if run['status'] not in ('completed', 'blocked', 'interrupted'):
                 raise DurableConflict('round is not terminal')
+            from .task_packages import read_definition_zip
+            definition = read_definition_zip(self.store.artifact(run['id'], 'task-definition.zip'))
+            if definition['revision'] != run['package_revision']:
+                raise DurableConflict('review frozen definition integrity mismatch')
             criteria = body.get('criteria', {})
-            expected = {c['id'] for c in task['package']['acceptance']}
+            expected = {c['id'] for c in definition['acceptance']}
             if not isinstance(criteria, dict) or set(criteria) - expected or any(type(v) is not bool for v in criteria.values()):
                 raise ValueError('invalid review criterion decisions')
             if body['decision'] == 'accepted':
-                required = {c['id'] for c in task['package']['acceptance'] if c.get('required', True)}
+                required = {c['id'] for c in definition['acceptance'] if c.get('required', True)}
                 if run['status'] != 'completed' or any(criteria.get(c) is not True for c in required):
                     raise ValueError('acceptance requires completed execution and explicit required-criterion decisions')
             history = run.setdefault('review_history', [])
@@ -560,6 +564,9 @@ class DurableTaskService:
                        "status": "queued", "created_at": stamp, "updated_at": stamp,
                        "generation": 0, "checkpoint": None, "session_id": task["checkpoint"]["session_id"] if task["checkpoint"] else None,
                        "artifacts": [], "unknown_side_effects": False}
+                if task.get('package'):
+                    run.update(package_revision=task['package']['revision'], package_snapshot=task['package'],
+                               evaluation={'status':'pending','reason':'Execution does not imply verification'})
                 self.store.put("durable_runs", run_id, run)
                 task.update(latest_run_id=run_id, status="queued", pause_requested=False)
             elif action == "pause":
@@ -895,11 +902,11 @@ class DurableTaskService:
             run.update(status="running", generation=generation, updated_at=now())
             if task.get('package'):
                 from .task_packages import revision_artifact
-                revision = task['package']['revision']
+                revision = run.get('package_revision', task['package']['revision'])
                 self.store.put_artifact(run['id'], 'task-definition.zip',
                                         self.store.artifact(task['id'], revision_artifact(revision)))
                 run['package_revision'] = revision
-                run['package_snapshot'] = task['package']
+                run['package_snapshot'] = run.get('package_snapshot', task['package'])
                 run['evaluation'] = {'status': 'pending', 'reason': 'Execution does not imply independent verification'}
                 task.pop('review', None)
             self.store.put("durable_tasks", task["id"], task)

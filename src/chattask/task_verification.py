@@ -15,6 +15,7 @@ import hashlib
 import io
 import json
 import math
+import re
 from pathlib import PurePosixPath
 import shlex
 import tarfile
@@ -135,6 +136,16 @@ print(json.dumps(result,ensure_ascii=False))
 '''
 
 
+def judge_codex_wrapper(runtime, binary):
+    """Rewardkit owns a fresh CODEX_HOME; bind routing explicitly per invocation."""
+    if not isinstance(binary,str) or not re.fullmatch(r'(/[A-Za-z0-9._+-]+)+',binary):
+        raise ValueError('operator image must supply an absolute Codex binary')
+    from .codex_tasks import task_model_argv
+    argv=task_model_argv(runtime)
+    argv[0]=binary
+    return '#!/bin/sh\nexec '+shlex.join(argv+['-c','model='+json.dumps(runtime.model)])+' "$@"\n'
+
+
 class SandboxPackageVerifier:
     """Use the existing TaskService resource/lifetime/ownership contract."""
     def __init__(self, parent, runtime, *, gateway=None, hosts=None, seconds=120):
@@ -155,6 +166,8 @@ class SandboxPackageVerifier:
                     raise ValueError('this adapter requires an explicit configured codex judge')
                 if judge.get('model', self.runtime.model) != self.runtime.model:
                     raise ValueError('judge model differs from the approved runtime model')
+                if judge.get('version'):
+                    raise ValueError('Codex versions must be supplied by the operator image, not installed by a task')
                 if judge.get('mcp_servers') or judge.get('isolated') or judge.get('samples', 1) != 1 or judge.get('mode', 'batched') != 'batched':
                     raise ValueError('this sandbox adapter supports one batched judge without extra tool servers or mounts')
                 for criterion in config.get('criterion', []):
@@ -195,8 +208,10 @@ class SandboxPackageVerifier:
         outcome = {'status': 'error', 'error': 'Verifier did not finish'}
         env = {'HOME': '/workspace/home', 'CODEX_HOME': '/workspace/codex-home',
                'PATH': '/usr/local/bin:/usr/bin:/bin', 'PIP_DISABLE_PIP_VERSION_CHECK': '1',
-               'PYTHONDONTWRITEBYTECODE': '1'}
-        secrets = []
+               'PYTHONDONTWRITEBYTECODE': '1', 'LITELLM_LOCAL_MODEL_COST_MAP': 'true',
+               'LITELLM_LOCAL_ANTHROPIC_BETA_HEADERS': 'true'}
+        secrets = [self.runtime.access_token, self.runtime.tool_access_token]
+        diagnostic = ''
         async with self.parent.lock:
             try:
                 runtime = self.runtime
@@ -211,10 +226,16 @@ class SandboxPackageVerifier:
                 create_attempted = True
                 sandbox, cfg, details = await service.create(ttl_seconds=self.seconds + 90, durable_run_id=ident)
                 async def command(argv, timeout=30, cwd='/'):
+                    nonlocal diagnostic
                     output = await asyncio.wait_for(sandbox.commands.run(shlex.join(argv), opts=RunCommandOpts(
                         timeout=timedelta(seconds=timeout), working_directory=cwd, envs=env)), timeout + 10)
                     receipt = service.output(output)
                     if receipt['exit_code'] != 0 or receipt.get('error'):
+                        text = '\n'.join(receipt[k] for k in ('stderr','stdout','error') if isinstance(receipt.get(k),str))
+                        for secret in secrets:
+                            if secret:
+                                text = text.replace(secret,'[REDACTED]').replace(base64.b64encode(secret.encode()).decode(),'[REDACTED]')
+                        diagnostic = text[:2000]
                         raise RuntimeError('verifier command failed')
                     return output
                 await command(['mkdir', '-p', '/app', '/tests', '/logs/verifier', '/workspace/home', '/workspace/codex-home'])
@@ -244,6 +265,11 @@ class SandboxPackageVerifier:
                         await command(['python', '-I', '-c', 'from pathlib import Path; Path("/workspace/verifier-ca.pem").write_bytes(Path("/etc/ssl/certs/ca-certificates.crt").read_bytes()+b"\\n"+Path("/workspace/public-ca.pem").read_bytes())'])
                         env.update(SSL_CERT_FILE='/workspace/verifier-ca.pem', REQUESTS_CA_BUNDLE='/workspace/verifier-ca.pem',
                                    CODEX_CA_CERTIFICATE='/workspace/verifier-ca.pem')
+                    located = await command(['sh','-c','command -v codex'])
+                    binary = service.output(located)['stdout'].strip()
+                    await command(['mkdir','-p','/workspace/judge-bin'])
+                    await sandbox.files.write_file('/workspace/judge-bin/codex',judge_codex_wrapper(runtime,binary),mode=700)
+                    env['PATH']='/workspace/judge-bin:'+env['PATH']
                 await command(['sh', '/tests/test.sh'], timeout=self.seconds, cwd='/app')
                 output = await command(['python', '-I', '-c', _SNAPSHOT])
                 pieces = []
@@ -271,6 +297,7 @@ class SandboxPackageVerifier:
                                         'requested_judge_model': runtime.model if model_required else None}}
             except Exception as exc:
                 outcome = {'status': 'error', 'error': type(exc).__name__}
+                if diagnostic:outcome['diagnostic'] = diagnostic
             finally:
                 absent = not create_attempted
                 if sandbox is not None:

@@ -73,6 +73,7 @@ def test_package_access_and_export_do_not_leak_private_runtime(tmp_path):
 
 def test_edit_uses_cas_and_does_not_rewrite_previous_revision(tmp_path):
     svc=service(tmp_path);task=create(svc);before=package(svc,task)
+    svc.pause('owner',task['id'],{'request_id':'pause-before-edit'})
     after=svc.revise_package('owner',task['id'],{'request_id':'edit','expected_revision':before['revision'],
                                                'definition':definition()})
     assert after['revision']!=before['revision']
@@ -140,6 +141,29 @@ def test_each_round_freezes_its_own_definition_and_archives_real_outputs(tmp_pat
     assert first_revision!=second['package_revision']
 
 
+def test_queued_definition_requires_pause_and_new_round_identity(tmp_path):
+    svc=DurableTaskService(TaskStore(tmp_path/'state'),SyntheticNativeExecutor())
+    task=create(svc,definition=definition());old=svc.runs('owner',task['id'])[0]
+    with pytest.raises(DurableConflict,match='queued'):
+        svc.revise_package('owner',task['id'],{'request_id':'unsafe-edit','expected_revision':old['package_revision'],'definition':definition('Changed after queue')})
+    svc.pause('owner',task['id'],{'request_id':'pause-to-edit'})
+    revised=svc.revise_package('owner',task['id'],{'request_id':'safe-edit','expected_revision':old['package_revision'],'definition':definition('Changed after pause')})
+    svc.resume('owner',task['id'],{'request_id':'new-round','instructions':'Execute the revised contract'})
+    new=svc.runs('owner',task['id'])[-1]
+    assert new['id']!=old['id'] and new['package_revision']==revised['revision']
+    assert svc.runs('owner',task['id'])[0]['package_revision']==old['package_revision']
+
+
+def test_review_uses_completed_round_contract_after_current_definition_changes(tmp_path):
+    svc=DurableTaskService(TaskStore(tmp_path/'state'),SyntheticNativeExecutor())
+    task=create(svc,definition=definition());run=asyncio.run(svc.worker_once())
+    changed=definition('Next round');changed['task.toml']=changed['task.toml'].replace('id = "AC1"','id = "AC_NEXT"')
+    newer=svc.revise_package('owner',task['id'],{'request_id':'next-definition','expected_revision':run['package_revision'],'definition':changed})
+    assert newer['revision']!=run['package_revision']
+    reviewed=svc.review_package('owner',task['id'],{'request_id':'review-old-round','run_id':run['id'],'expected_revision':run['package_revision'],'decision':'accepted','criteria':{'AC1':True},'notes':'Reviewed the frozen output, not the next-round contract.'})
+    assert reviewed['revision']==run['package_revision']
+
+
 def test_unavailable_verifier_never_generates_a_passing_reward(tmp_path):
     svc=DurableTaskService(TaskStore(tmp_path/'state'),SyntheticNativeExecutor())
     task=create(svc,definition=definition());run=asyncio.run(svc.worker_once())
@@ -192,9 +216,10 @@ def test_preparation_success_does_not_make_a_timed_out_solver_quiescent(monkeypa
     from chattask.codex_tasks import CodexTaskExecutor,CodexRuntime
     from chattask.settings import TaskSettings
     from chattask.task_packages import initial_package
-    captures=[];preparation_prompts=[]
+    captures=[];preparation_prompts=[];preparation_budgets=[]
     class Commands:
         async def run(self,command,opts):
+            if '> /workspace/preparation-events.jsonl' in command:preparation_budgets.append(opts.timeout.total_seconds())
             if '> /workspace/agent-events.jsonl' in command:raise TimeoutError('synthetic in-flight solver')
             if 'capture_checkpoint.py' in command:captures.append(command)
             return N()
@@ -229,6 +254,7 @@ def test_preparation_success_does_not_make_a_timed_out_solver_quiescent(monkeypa
     assert captures==[], 'A completed preparation turn must not certify the next solver as stopped'
     assert preparation_prompts and 'Do not call tools or run any commands' in preparation_prompts[0]
     assert 'stdlib-only' in preparation_prompts[0]
+    assert preparation_budgets==[450], 'Preparation shares a finite half of the total runtime budget'
 
 
 def test_null_preparation_cannot_be_certified_as_agent_generated(tmp_path):

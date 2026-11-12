@@ -411,7 +411,40 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#long-term-task-candidate" class="md-nav__link">
+  <a href="#task-package-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      Task package lifecycle (unreleased candidate)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Task package lifecycle (unreleased candidate)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#conversation-submission" class="md-nav__link">
+    <span class="md-ellipsis">
+      Conversation submission
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python-publication-is-a-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      Python publication is a Task
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#durable-task-contract" class="md-nav__link">
     <span class="md-ellipsis">
       Long-term Task candidate
     </span>
@@ -657,7 +690,40 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#long-term-task-candidate" class="md-nav__link">
+  <a href="#task-package-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      Task package lifecycle (unreleased candidate)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Task package lifecycle (unreleased candidate)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#conversation-submission" class="md-nav__link">
+    <span class="md-ellipsis">
+      Conversation submission
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python-publication-is-a-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      Python publication is a Task
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#durable-task-contract" class="md-nav__link">
     <span class="md-ellipsis">
       Long-term Task candidate
     </span>
@@ -750,7 +816,87 @@
 
 
 <h1 id="generic-tasks-and-images">Generic tasks and images<a class="headerlink" href="#generic-tasks-and-images" title="Permanent link">&para;</a></h1>
-<h2 id="long-term-task-candidate">Long-term Task candidate<a class="headerlink" href="#long-term-task-candidate" title="Permanent link">&para;</a></h2>
+<h2 id="task-package-lifecycle">Task package lifecycle (unreleased candidate)<a class="headerlink" href="#task-package-lifecycle" title="Permanent link">&para;</a></h2>
+<p>A Task owns its definition from creation, not just a ZIP assembled afterward. <code>task.toml</code> uses the Harbor 1.4 structure with purpose, deliverables, acceptance and template/resource declarations under the <code>metadata.chatarch</code> extension. This adapter supports a bounded subset, not every Harbor environment or Agent plugin, and does not automatically install Harbor/Rewardkit.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>task.toml                         # Structured purpose, deliverables and criteria
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>instruction.md                    # Complete instructions for the solver
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>inputs/                           # Parameters, sources and resource references, no credentials
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>environment/skills/&lt;name&gt;/SKILL.md # Optional task-scoped method, not a global grant
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>tests/test.sh                     # Independent verifier entrypoint in a new Sandbox
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>tests/checks.py                    # Programmatic checks when required
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>tests/quality.toml                 # Optional model rubric
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>tests/judge-guide.md               # Optional judge guidance
+</code></pre></div>
+<p>Natural-language Tasks start with a pending definition. The Agent prepares checks/rubrics; the server freezes the definition before solving. Imported complete definitions skip preparation. Execution, independent verification and human acceptance are distinct: missing criteria, verifier errors, unavailable reviews and unknown cleanup never pass. Required failures cannot be averaged away. CAS revisions create new definitions without rewriting old Run snapshots.</p>
+<p>Private round exports preserve the frozen definition, observed native events/ATIF, deliverables, reward/details and explicit review. Native checkpoints remain private to continuation and are excluded from reusable exports. Reuse creates a new Task without another instance's account, checkpoint, score or grants. Failed rounds remain evidence; the library is not a public dataset. ATIF is an exchange format, not a native session checkpoint.</p>
+<p>The default Task view provides bounded text-file import, definition editing/cancel/revision, library search, reuse, downloads and explicit human review. Importable APIs live in <code>DurableTaskService</code>, <code>TaskTemplateService</code> and <code>PackageService</code>; consult the actual <code>chattask --tree</code> for commands:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>chattask<span class="w"> </span>task<span class="w"> </span>package<span class="w"> </span>init<span class="w"> </span>./example-task<span class="w"> </span><span class="s1">'Build a tested utility'</span><span class="w"> </span>--image<span class="w"> </span><span class="s1">'&lt;operator-image&gt;'</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>chattask<span class="w"> </span>task<span class="w"> </span>package<span class="w"> </span>validate<span class="w"> </span>./example-task
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>chattask<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span>--definition-dir<span class="w"> </span>./example-task<span class="w"> </span>--image-profile<span class="w"> </span>python-package<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>--request-id<span class="w"> </span>example-create<span class="w"> </span>--owner<span class="w"> </span>operator<span class="w"> </span>--env-profile<span class="w"> </span>site
+</code></pre></div>
+<p><code>validate --official</code> additionally requires the pinned Harbor 0.25.0 schema already installed. Default validation honestly reports <code>official_schema_checked=false</code> and executes no task. Imports allow at most 64 UTF-8 files/256 KiB and no symlink traversal. HTTP body limits are enforced separately.</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Contract</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/task-templates</code></td>
+<td>Fixed templates, explicit revisions and parameter contracts</td>
+</tr>
+<tr>
+<td><code>POST /api/task-templates/{id}/instantiate</code></td>
+<td><code>request_id</code>, <code>template_revision</code>, <code>parameters</code>; general templates also select registered <code>image_profile</code></td>
+</tr>
+<tr>
+<td><code>GET /api/task-resources</code></td>
+<td>Configuration presence, not reachability or secret values</td>
+</tr>
+<tr>
+<td><code>GET /api/task-library</code></td>
+<td>Visible general/Python release Tasks, at most 100 items</td>
+</tr>
+<tr>
+<td><code>GET/PUT /api/durable/tasks/{id}/package</code></td>
+<td>Read definition or save <code>files</code> with stable <code>request_id</code> and <code>expected_revision</code></td>
+</tr>
+<tr>
+<td><code>GET /api/durable/tasks/{id}/package.zip</code></td>
+<td>Definition ZIP with optional <code>revision</code></td>
+</tr>
+<tr>
+<td><code>POST /api/durable/tasks/{id}/reuse</code></td>
+<td>New private Task without inherited success</td>
+</tr>
+<tr>
+<td><code>POST /api/durable/tasks/{id}/runs/{run}/evaluate</code></td>
+<td>Durable evaluation queue; HTTP never executes submitted scripts</td>
+</tr>
+<tr>
+<td><code>GET /api/durable/tasks/{id}/runs/{run}/evaluations</code></td>
+<td>That exact round's evaluation history</td>
+</tr>
+<tr>
+<td><code>POST /api/durable/tasks/{id}/review</code></td>
+<td>Explicit <code>request_id</code>, <code>run_id</code>, <code>expected_revision</code>, <code>decision</code>, criterion evidence and <code>notes</code></td>
+</tr>
+</tbody>
+</table>
+<p>The independent verifier starts a new Sandbox from the frozen definition and exact round outputs. Operators must provision required Python/Rewardkit/supported Codex judge dependencies. Missing dependencies or unavailable upstreams are verification errors, not evidence that content passed or failed. A configured model/image/gateway reference does not prove live availability.</p>
+<h3 id="conversation-submission">Conversation submission<a class="headerlink" href="#conversation-submission" title="Permanent link">&para;</a></h3>
+<p>An Agent can call authenticated <code>POST /api/task-intake</code> or use the thin HTTP client:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>chattask<span class="w"> </span>task<span class="w"> </span>submit<span class="w"> </span><span class="s1">'Build a tested utility with explicit deliverables'</span><span class="w"> </span>--request-id<span class="w"> </span>message-unique-id<span class="w"> </span>--env-profile<span class="w"> </span>site
+</code></pre></div>
+<p>The named profile supplies the existing site origin and login server-side. The API derives ownership from that login, selects the only configured image or requires an explicit <code>--image-profile</code>, and returns <code>task_id</code>, <code>status</code> and an exact authenticated <code>url</code>. Reuse the same message-derived request ID and payload after an uncertain response; do not create a second task blindly. Templates accept <code>--template research-report|python-package --parameters-file parameters.json</code>. Python publication creates a draft only: submission is not release approval. Trusted local <code>task create --owner ...</code> remains an operator surface, not remote authentication.</p>
+<h3 id="python-publication-is-a-task">Python publication is a Task<a class="headerlink" href="#python-publication-is-a-task" title="Permanent link">&para;</a></h3>
+<p>Saving <code>python-package@1</code> parameters creates a package without dispatching publication. Model, environment, exact repository, OIDC Publisher and package-index resources remain references; server-side services issue existing constrained capabilities per stage. Established projects reuse their unchanged publishing chain instead of reopening PyPI login/Publisher setup.</p>
+<p>The original PackageService still owns read-only preparation → exact target/plan confirmation → scoped publication → independent readback. Each stage binds a native task ID, draft revision and definition digest. Parameter changes invalidate old previews without overwriting old definitions. Under <code>/api/package/drafts/{id}/</code>, <code>task-package</code> and <code>task-package.zip</code> read/export definitions; <code>task-data.zip</code> includes versioned definitions, observed stage state, trusted validation/publication receipts and digest references to other artifacts. It does not automatically copy arbitrary workspaces or native sessions. Machine publication verification is not human business acceptance.</p>
+<p>This adds no second publishing engine. Selecting a template or providing resources grants no push, PR, merge, tag, upload or production-restart permission. Candidate functionality and published/live versions require separate acceptance.</p>
+<h2 id="durable-task-contract">Long-term Task candidate<a class="headerlink" href="#durable-task-contract" title="Permanent link">&para;</a></h2>
 <p>Long-term Tasks are separate from one-shot <code>chattask run</code>. <code>POST /api/durable/tasks</code> accepts <code>request_id</code>, <code>instructions</code> and <code>image_profile</code>; the authenticated principal becomes owner. <code>GET /api/durable/tasks</code>, <code>/{id}</code> and <code>/{id}/runs</code> return private history. <code>POST /{id}/resume</code> accepts a new <code>request_id</code>, <code>instructions</code> and optional <code>acknowledge_unknown=true</code>; <code>POST /{id}/pause</code> and <code>/{id}/complete</code> accept <code>request_id</code>. Owner-only <code>POST /{id}/members</code> grants a named principal <code>viewer</code> or <code>editor</code>. <code>GET /{id}/runs/{run_id}/artifacts/{name}</code> checks access and SHA256. These paths all start with <code>/api/durable/tasks</code>, and writes use the existing site CSRF protection. Equal repeated request IDs return the same result; changed input conflicts. An active round cannot be resumed again.</p>
 <p>Creation defaults to <code>workflow=development</code>. Research either sets <code>workflow=research</code> with 1–12 caller-verified <code>source_records</code>, or uses authenticated <code>POST /api/durable/research/auto</code> with <code>request_id</code>, <code>instructions</code>, <code>image_profile</code>, plain-text <code>query</code> and optional <code>max_results</code> (1–5). The latter retrieves and persists real arXiv Atom abstracts on the Task. <strong>This is abstract-only discovery; it does not imply full-paper reading or relevance review.</strong> Later rounds can supply new records or inherit the prior set. The model must write <code>/workspace/result/research/main.tex</code> as self-contained <code>ctexart</code>/xelatex with inline bibliography; <code>references.bib</code>, report and source metadata may accompany it. The trusted worker reads only that round's result archive and never accepts browser-selected container, project, user, path or command. <code>ResearchPublisher</code> binds the original Overleaf project to the Task; actual PDF and source readback become <code>research.pdf</code> and <code>research-source.zip</code> on the same Run, with native receipt and project link. Compile, sync and conflict failures stay blocked. After inspecting an unknown external outcome, <code>POST /{id}/reconcile-research</code> with a new <code>request_id</code> and <code>acknowledge_unknown=true</code> enqueues same-Run publication reconciliation without rerunning Codex.</p>
 <p>The bridge is enabled only when both <code>CHATTASK_RESEARCH_OVERLEAF_CONTAINER</code> and HTTPS <code>CHATTASK_RESEARCH_OVERLEAF_ORIGIN</code> are configured. Development tasks need neither. Optional sensitive <code>CHATTASK_LOGIN_USERS_JSON</code> contains at most eight records with <code>username</code>, <code>password</code>, <code>principal_id</code>, <code>display_name</code>, verified by shared ChatLogin. The original site-operator username/password and <code>site-operator</code> principal remain; principal IDs must be unique. Do not add test accounts to production. Operators supply configuration, never browsers.</p>
@@ -769,9 +915,9 @@
 <p>Never bake credentials into an image. Runtime command environments inject the Codex access credential. Guest programs can still read that environment, so prefer a short-lived, constrained model/tool gateway credential. Keep GitHub PATs, PyPI passwords, sessions, TOTP secrets and upload keys on their respective trusted tool services. Task input cannot select host paths, raw credentials, arbitrary provider URLs or arbitrary images.</p>
 <p>The current image contract includes <code>codex</code>, the companion tool host required by that Codex version, Python 3 and <code>sh</code>. Add Git, compilers, ChatPyPI or other infrastructure according to the task. A package image does not make Python packaging mandatory for generic tasks. Ordinary Docker/runc is a trusted-user isolation boundary, not strong isolation for hostile multi-tenancy.</p>
 <h2 id="cli-entry">CLI entry<a class="headerlink" href="#cli-entry" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>chattask<span class="w"> </span>run<span class="w"> </span>--instructions-file<span class="w"> </span>task.txt<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>--image-profile<span class="w"> </span>python-package<span class="w"> </span>--request-id<span class="w"> </span>task-001<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--env-profile<span class="w"> </span>site<span class="w"> </span>--json-output
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>chattask<span class="w"> </span>run<span class="w"> </span>--instructions-file<span class="w"> </span>task.txt<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--image-profile<span class="w"> </span>python-package<span class="w"> </span>--request-id<span class="w"> </span>task-001<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--env-profile<span class="w"> </span>site<span class="w"> </span>--json-output
 </code></pre></div>
 <p>The same request ID and input reconcile to the existing task. Changed input under that ID is rejected. <code>--input-task-id</code> accepts only the same owner's existing digest-verified result archive. CLI calls reuse <code>chattask.agent_tasks.run_task</code>; Web and HTTP share <code>AgentTaskService</code> and <code>CodexTaskExecutor</code>.</p>
 <h2 id="http-entry">HTTP entry<a class="headerlink" href="#http-entry" title="Permanent link">&para;</a></h2>

@@ -597,7 +597,22 @@
 <tr>
 <td>Long-term Task candidate</td>
 <td>Stable identity, per-round history, single-writer worker, bounded checkpoint and native session resume</td>
-<td><a href="../tasks/#long-term-task-candidate">End-of-round pause and manual failure inspection</a>; production deployment requires separate acceptance</td>
+<td><a href="../tasks/#durable-task-contract">End-of-round pause and manual failure inspection</a>; production deployment requires separate acceptance</td>
+</tr>
+<tr>
+<td>Structured Task candidate</td>
+<td>Creation-time definitions, CAS revisions/frozen rounds, private import/reuse/export and observable ATIF</td>
+<td>Native checkpoints are not reusable exports; no invented legacy data or automatic public dataset</td>
+</tr>
+<tr>
+<td>Independent verification candidate</td>
+<td>Durable evaluation queue, fresh Sandbox, criterion checks/rubrics and separate human decisions</td>
+<td>Missing dependencies/criteria, errors and unknown cleanup never pass; model judging is not objective truth</td>
+</tr>
+<tr>
+<td>Task Template candidate</td>
+<td>Fixed method/acceptance with instance data; Python releases reuse the original workflow and stage history</td>
+<td>References are not credentials, live availability or publishing grants; real model/deployment acceptance is separate</td>
 </tr>
 <tr>
 <td>Research round candidate</td>

@@ -597,7 +597,22 @@
 <tr>
 <td>长期 Task 候选</td>
 <td>稳定身份、逐轮历史、单写者 worker、受限检查点和原生会话接续</td>
-<td><a href="../tasks/#长期任务候选">阶段边界暂停、失败需人工核对</a>；生产部署须单独验收</td>
+<td><a href="../tasks/#durable-task-contract">阶段边界暂停、失败需人工核对</a>；生产部署须单独验收</td>
+</tr>
+<tr>
+<td>规范化任务候选</td>
+<td>创建即初始化任务包、CAS 修订/逐轮冻结、私有导入/复用/导出、可观察 ATIF</td>
+<td>原生 checkpoint 不进入复用单元；不倒填旧数据，不自动公开</td>
+</tr>
+<tr>
+<td>独立验证候选</td>
+<td>持久验证队列、新 Sandbox、逐项 checks/rubric、人工决定分离</td>
+<td>缺依赖、缺项、错误和清理未知不算通过；模型评审非客观真值</td>
+</tr>
+<tr>
+<td>Task Template 候选</td>
+<td>固定方法/验收+实例参数，Python 发版复用原发布流程与阶段记录</td>
+<td>资源引用不是凭据、当前可用性或发布授权；生产与真实模型另验</td>
 </tr>
 <tr>
 <td>研究轮次候选</td>

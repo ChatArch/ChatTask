@@ -218,7 +218,9 @@ class CodexTaskExecutor:
                 if runtime.ca_certificate:
                     await sandbox.files.write_file('/workspace/public-ca.pem',runtime.ca_certificate,mode=644)
                     await command(['python','-c','from pathlib import Path; system=Path("/etc/ssl/certs/ca-certificates.crt"); ca=Path("/workspace/public-ca.pem").read_bytes(); original=system.read_bytes(); assert original; system.open("ab").write(b"\\n"+ca); Path("/workspace/task-ca.pem").write_bytes(system.read_bytes())'])
-                if mode!='verify':await command(['codex','--version'])
+                if mode!='verify':
+                    version = await command(['codex','--version'])
+                    outcome['codex_cli_version'] = version['stdout'].strip()
                 if task.get('_input_archive') is not None:
                     await command(['mkdir','-p','/workspace/input'])
                     await sandbox.files.write_file('/workspace/input/previous-result.tar.gz',task['_input_archive'],mode=600)

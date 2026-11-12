@@ -11,6 +11,7 @@ import json
 import re
 import shlex
 import tarfile
+import time
 import uuid
 from urllib.parse import urlsplit
 from opensandbox.models.execd import RunCommandOpts
@@ -87,10 +88,22 @@ def native_resume_argv(common, model, session_id, help_text, root_help):
             '--skip-git-repo-check','--model',model,'--json',
             '--output-last-message','/workspace/agent-final.md',session_id,'-']
 
+
+def task_model_argv(runtime):
+    return ['codex','--disable','unbounded_connection_retries','-c','model_provider="task"',
+            '-c','model_providers.task.name="Task gateway"','-c','model_providers.task.wire_api="responses"',
+            '-c','model_providers.task.env_key="CHATTASK_CODEX_API_KEY"',
+            '-c','model_providers.task.base_url='+json.dumps(runtime.base_url),
+            '-c','model_providers.task.request_max_retries=1','-c','model_providers.task.stream_max_retries=1',
+            '-c','model_providers.task.stream_idle_timeout_ms=90000','-c','model_reasoning_effort="xhigh"']
+
 class CodexTaskExecutor:
     def __init__(self,task_service,runtime:CodexRuntime,*,gateway=None,hosts=None):
         self.task_service=task_service;self.runtime=runtime;self.images=dict(runtime.images)
         self.gateway=gateway;self.hosts=hosts or {};self.postprocessors={}
+        from .task_verification import SandboxPackageVerifier
+        self.package_verifier = (SandboxPackageVerifier(task_service,runtime,gateway=gateway,hosts=self.hosts,seconds=300)
+                                 if task_service is not None else None)
 
     def register_postprocessor(self,mode,handler,max_seconds):
         if mode not in ('prepare','publish','verify') or not 1<=max_seconds<=900:
@@ -115,7 +128,9 @@ class CodexTaskExecutor:
         invocation={'id':run['id'],'instructions':instructions,
                     'image_profile':task['image_profile'],
                     '_durable':{'checkpoint':checkpoint,'session_id':run['session_id'],
-                                'save_checkpoint':save_checkpoint}}
+                                'save_checkpoint':save_checkpoint,
+                                'prepare_definition':task.get('_prepare_definition'),
+                                'definition_files':task.get('_definition_files')}}
         return await self.execute(invocation,progress,lambda: False)
 
     async def reconcile_durable(self,run):
@@ -155,6 +170,7 @@ class CodexTaskExecutor:
         service=None
         sandbox=cfg=None;outcome={'ok':False,'artifacts':[],'cleanup':{'container_absent':True,'not_created':True}}
         sandbox_create_attempted=False
+        outcome['requested_model'] = runtime.model
         async with self.task_service.lock:
             gateway_intent=False
             try:
@@ -187,6 +203,9 @@ class CodexTaskExecutor:
                     nonlocal model_quiescent
                     env=runtime.guest_env()
                     if mode=='verify':env.pop('CHATTASK_CODEX_API_KEY',None)
+                    model_command = argv[:2] == ['sh','-c'] and 'codex' in argv[2]
+                    if model_command:
+                        model_quiescent = False
                     output=await asyncio.wait_for(sandbox.commands.run(shlex.join(argv),opts=RunCommandOpts(
                         timeout=timedelta(seconds=seconds),working_directory=cwd,envs=env)),seconds+10)
                     receipt=service.output(output)
@@ -218,7 +237,9 @@ class CodexTaskExecutor:
                 if runtime.ca_certificate:
                     await sandbox.files.write_file('/workspace/public-ca.pem',runtime.ca_certificate,mode=644)
                     await command(['python','-c','from pathlib import Path; system=Path("/etc/ssl/certs/ca-certificates.crt"); ca=Path("/workspace/public-ca.pem").read_bytes(); original=system.read_bytes(); assert original; system.open("ab").write(b"\\n"+ca); Path("/workspace/task-ca.pem").write_bytes(system.read_bytes())'])
-                if mode!='verify':await command(['codex','--version'])
+                if mode!='verify':
+                    version = await command(['codex','--version'])
+                    outcome['codex_cli_version'] = version['stdout'].strip()
                 if task.get('_input_archive') is not None:
                     await command(['mkdir','-p','/workspace/input'])
                     await sandbox.files.write_file('/workspace/input/previous-result.tar.gz',task['_input_archive'],mode=600)
@@ -226,6 +247,68 @@ class CodexTaskExecutor:
                 await sandbox.files.write_file('/workspace/collect_results.py',COLLECTOR,mode=600)
                 await update({'index':0,'status':'passed','receipt':{'image_profile':task['image_profile'],'runtime':details}})
                 if mode!='verify':
+                    started = time.monotonic()
+                    if durable and durable.get('prepare_definition'):
+                        await update({'phase':'package_preparation_started'})
+                        preparation = (
+                            'Prepare a task package, NOT its solution. Do not perform the user task or external writes. '
+                            'Do not call tools or run any commands: this phase only authors the provided-material contract, '
+                            'not environment discovery, dependency imports, installation or solving. '
+                            'Prefer a stdlib-only programmatic verifier for code/data tasks: tests/test.sh runs python -I /tests/checks.py; '
+                            'checks.py reads actual deliverables under /app, computes each declared boolean criterion, creates '
+                            '/logs/verifier, and writes reward.json as {"reward": 1.0 or 0.0} plus reward-details.json as '
+                            '{"criteria":[{"id":"AC1","value":1.0 or 0.0,"reasoning":"actual observation"}]}. '
+                            'A normal failing criterion writes zero and exits normally; an unexpected verifier error is not a pass. '
+                            'Use Rewardkit only for genuinely model-judged criteria; no Rewardkit import is needed to author these files. '
+                            'Return ONLY a JSON object with one key "files", whose value maps relative UTF-8 filenames to text. '
+                            'Use Harbor task schema 1.4: task.toml, instruction.md, tests/test.sh, and appropriate checks/rubric. '
+                            'Keep business fields in metadata.chatarch: purpose, deliverables, acceptance tables with stable id, '
+                            'description, method (script/rubric/human), and required boolean. Do not invent extra hard requirements. '
+                            'For model-judged work, use Rewardkit 0.2.4 tests/quality.toml with explicit judge="codex", stable criterion IDs '
+                            'and binary/likert/rubric types. A Markdown judge guide may use prompt_template and must contain {criteria}. '
+                            'tests/test.sh may run python -m rewardkit /tests. Verifier outputs live at /logs/verifier; '
+                            'graded delivered files are restored under /app. Do not hardcode success, credentials, model keys, '
+                            'host mounts or new provider URLs. Preserve the original goal and supplied factual source boundaries. '
+                            'List required deliverables and observable acceptance; use human review where automation cannot establish truth. '
+                            'This is preparation, not a claim that tests or the task have passed.\n\nUSER REQUEST:\n'+task['instructions']+
+                            '\n\nINITIAL DRAFT FILES:\n'+json.dumps(durable.get('definition_files') or {},ensure_ascii=False))
+                        await sandbox.files.write_file('/workspace/preparation-prompt.txt',preparation,mode=600)
+                        prep_argv=task_model_argv(runtime)+['exec','--skip-git-repo-check','--sandbox','danger-full-access',
+                            '--model',runtime.model,'--cd','/workspace/work','--json',
+                            '--output-last-message','/workspace/prepared-definition.json','-']
+                        shell=('env -u CHATTASK_TOOL_ACCESS_TOKEN -u CHATTASK_TOOL_BASE_URL '+shlex.join(prep_argv)+
+                               ' < /workspace/preparation-prompt.txt > /workspace/preparation-events.jsonl 2> /workspace/preparation-stderr.txt')
+                        await command(['sh','-c',shell],seconds=max(10,min(450,runtime.seconds//2)))
+                        prep_events=runtime.redact(await sandbox.files.read_file('/workspace/preparation-events.jsonl'))
+                        self._artifact(outcome,'package-preparation.events.jsonl',prep_events.encode()[:1024*1024])
+                        records=[json.loads(line) for line in prep_events.splitlines() if line.strip()]
+                        if not any(e.get('type')=='turn.completed' for e in records) or any(e.get('type')=='turn.failed' for e in records):
+                            raise RuntimeError('native package preparation did not complete')
+                        raw=await sandbox.files.read_file('/workspace/prepared-definition.json')
+                        if len(raw.encode())>256*1024:
+                            raise ValueError('prepared task definition exceeds limit')
+                        if any(secret and (secret in raw or base64.b64encode(secret.encode()).decode() in raw)
+                               for secret in (runtime.access_token,runtime.tool_access_token)):
+                            raise ValueError('credential appeared in prepared task definition')
+                        prepared_json=json.loads(raw)
+                        if not isinstance(prepared_json,dict) or set(prepared_json)!={'files'}:
+                            raise ValueError('preparation must return a files object')
+                        prepared=await durable['prepare_definition'](prepared_json['files'])
+                        durable['definition_files']=prepared['files']
+                        outcome['preparation_receipt']={'definition_revision':prepared['revision'],
+                            'native_session_id':next((e['thread_id'] for e in records if e.get('type')=='thread.started'),None),
+                            'events_sha256':hashlib.sha256(prep_events.encode()).hexdigest(),'native_turn_completed':True}
+                    if durable and durable.get('definition_files'):
+                        from .task_packages import validate_files
+                        definition=validate_files(durable['definition_files'])
+                        for name,text in definition['files'].items():
+                            target='/workspace/task-definition/'+name
+                            await command(['mkdir','-p',target.rsplit('/',1)[0]])
+                            await sandbox.files.write_file(target,text,mode=600)
+                        task['instructions'] += ('\n\nFROZEN TASK CONTRACT:\n'+json.dumps({k:definition[k]
+                            for k in ('purpose','deliverables','acceptance')},ensure_ascii=False)+
+                            '\nThe exact definition and supplied inputs are under /workspace/task-definition. '
+                            'Do not edit the frozen acceptance files. Put all deliverables under /workspace/result.')
                     prompt=(
                         'You execute a user task inside an owned container. Work under /workspace/work. '
                         'Put all deliverables under /workspace/result. Write /workspace/agent-started.txt with your cwd immediately. '
@@ -240,12 +323,7 @@ class CodexTaskExecutor:
                         'Use shell login=false if supported. If this task selects previous results, they are available as /workspace/input/previous-result.tar.gz.\n\nUSER TASK:\n'+task['instructions'])
                     await sandbox.files.write_file('/workspace/task-prompt.txt',prompt,mode=600)
                     await update({'index':1,'status':'running'})
-                    argv=['codex','--disable','unbounded_connection_retries','-c','model_provider="task"',
-                          '-c','model_providers.task.name="Task gateway"','-c','model_providers.task.wire_api="responses"',
-                          '-c','model_providers.task.env_key="CHATTASK_CODEX_API_KEY"',
-                          '-c','model_providers.task.base_url='+json.dumps(runtime.base_url),
-                          '-c','model_providers.task.request_max_retries=1','-c','model_providers.task.stream_max_retries=1',
-                          '-c','model_reasoning_effort="xhigh"']
+                    argv=task_model_argv(runtime)
                     if durable and durable['session_id']:
                         help_text=(await command(['codex','exec','resume','--help'],full_stdout_limit=16*1024))['stdout']
                         root_help=(await command(['codex','--help'],full_stdout_limit=16*1024))['stdout']
@@ -255,7 +333,8 @@ class CodexTaskExecutor:
                                '--model',runtime.model,'--cd','/workspace/work','--json',
                                '--output-last-message','/workspace/agent-final.md','-']
                     shell=shlex.join(argv)+' < /workspace/task-prompt.txt > /workspace/agent-events.jsonl 2> /workspace/agent-stderr.txt'
-                    await command(['sh','-c',shell],seconds=runtime.seconds)
+                    if durable:await update({'phase':'agent_execution_started'})
+                    await command(['sh','-c',shell],seconds=max(1,int(runtime.seconds-(time.monotonic()-started))))
                     model_quiescent=True
                     events=runtime.redact(await sandbox.files.read_file('/workspace/agent-events.jsonl'))
                     session=None;completed=False;failed=False
@@ -330,13 +409,25 @@ class CodexTaskExecutor:
                         await durable['save_checkpoint'](checkpoint_data,outcome['codex_session_id'])
                     except Exception:pass
                 if sandbox is not None and mode!='verify':
+                    if durable and durable.get('prepare_definition') and not any(a['name']=='package-preparation.events.jsonl' for a in outcome['artifacts']):
+                        try:
+                            partial=runtime.redact(await sandbox.files.read_file('/workspace/preparation-events.jsonl'))
+                            self._artifact(outcome,'package-preparation.events.jsonl',partial.encode()[:1024*1024])
+                            outcome.setdefault('preparation_receipt',{'native_turn_completed':False,'diagnostic_only':True,
+                                'events_sha256':hashlib.sha256(partial.encode()).hexdigest()})
+                        except Exception:pass
                     if not any(a['name']=='codex.events.jsonl' for a in outcome['artifacts']):
                         try:
                             partial=runtime.redact(await sandbox.files.read_file('/workspace/agent-events.jsonl'))
                             self._artifact(outcome,'codex.events.jsonl',partial.encode()[:1024*1024])
                         except Exception:pass
-                    try:outcome['diagnostic']=runtime.redact(await sandbox.files.read_file('/workspace/agent-stderr.txt'))[-1500:]
-                    except Exception:pass
+                    for diagnostic_path in ('/workspace/agent-stderr.txt','/workspace/preparation-stderr.txt'):
+                        try:
+                            diagnostic=runtime.redact(await sandbox.files.read_file(diagnostic_path))[-1500:]
+                            if diagnostic:
+                                outcome['diagnostic']=diagnostic
+                                break
+                        except Exception:pass
             finally:
                 if sandbox is not None:
                     try:

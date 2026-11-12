@@ -53,6 +53,8 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
     if public_dependencies is None:
         public_dependencies=load_guest_dependencies(settings)
     packages = PackageService(workflow.store, agent_tasks, broker_required=True,public_dependencies=public_dependencies)
+    from .task_templates import TaskTemplateService
+    task_templates = TaskTemplateService(durable_tasks, packages)
     analysis = analysis if analysis is not None else WorkspaceAnalysis(workflow.store, profile=settings.analysis_profile, home=settings.home)
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -108,6 +110,9 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
                         ids = request.query_params.getlist('workspace_task')
                         if len(ids) == 1 and re.fullmatch(r'[0-9a-f]{32}', ids[0]):
                             target += '?workspace_task=' + ids[0]
+                        tasks = request.query_params.getlist('task')
+                        if len(tasks) == 1 and re.fullmatch(r'[0-9a-f]{32}', tasks[0]):
+                            target = '/?task=' + tasks[0]
                         return RedirectResponse('/auth/?' + urlencode({'next': target}), status_code=303)
                     raise
         except HTTPException as exc:
@@ -116,7 +121,7 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
             length = int(request.headers.get('content-length', '0'))
         except ValueError:
             return JSONResponse({'error': 'invalid content length'}, status_code=400)
-        limit = 65536 if integration or request.url.path == '/api/agent/tasks' or request.url.path.startswith('/api/package/') or request.url.path.startswith('/api/durable/') else 4096
+        limit = 65536 if integration or request.url.path in ('/api/agent/tasks','/api/task-intake') or request.url.path.startswith('/api/package/') or request.url.path.startswith('/api/durable/') or request.url.path.startswith('/api/task-templates/') else 4096
         if length > limit or length < 0:
             return JSONResponse({'error': 'request too large'}, status_code=413)
         if request.method in ('POST','PUT','PATCH'):
@@ -285,6 +290,97 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
             raise HTTPException(422, detail=str(exc))
         raise exc
 
+    @app.post('/api/task-intake')
+    async def conversation_task_intake(request: Request, body: dict):
+        try:
+            actor = await owner(request)
+            if set(body)-{'request_id','instructions','image_profile','template_id','template_revision','parameters'}:
+                raise ValueError('unknown intake field; identity and credentials are server-owned')
+            if 'template_id' in body:
+                if 'instructions' in body:raise ValueError('use template parameters or free instructions, not both')
+                value = await task_templates.instantiate(actor,body['template_id'],{k:v for k,v in body.items() if k!='template_id'})
+                kind = value.get('kind','durable')
+                task = value.get('draft',value)
+            else:
+                if set(body)&{'template_revision','parameters'}:raise ValueError('template parameters require a template_id')
+                image = body.get('image_profile')
+                if image is None:
+                    if len(durable_tasks.image_profiles)!=1:raise ValueError('select one operator image_profile from the available task resources')
+                    image = next(iter(durable_tasks.image_profiles))
+                if not isinstance(image,str):raise ValueError('image_profile must be a configured profile ID')
+                task = durable_tasks.create(actor,{'request_id':body.get('request_id'),'instructions':body.get('instructions'),'image_profile':image})
+                kind = 'durable'
+            path = '/#package='+task['id'] if kind=='python-package' else '/?task='+task['id']
+            return {'task_id':task['id'],'kind':kind,'status':task.get('status','draft'),
+                    'url':settings.origin+path,'task':task}
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.get('/api/task-templates')
+    async def task_template_catalog(request: Request):
+        await owner(request)
+        return {'templates': task_templates.catalog()}
+
+    @app.post('/api/task-templates/{template_id}/instantiate')
+    async def task_template_instantiate(request: Request, template_id: str, body: dict):
+        try:
+            return await task_templates.instantiate(await owner(request), template_id, body)
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.get('/api/task-library')
+    async def task_library(request: Request):
+        return {'tasks': task_templates.library(await owner(request)), 'limit': 100}
+
+    @app.get('/api/task-resources')
+    async def task_resources(request: Request):
+        await owner(request)
+        executor = getattr(agent_tasks, 'executor', None)
+        runtime = getattr(executor, 'runtime', None)
+        gateway = getattr(executor, 'gateway', None)
+        return {'image_profiles': agent_tasks.images(),
+                'model': {'configured': runtime is not None, 'model': getattr(runtime, 'model', None), 'verification': 'not-probed'},
+                'gateway': {'configured': gateway is not None, 'verification': 'not-probed',
+                            'authorization': 'prepare-read-only; publish-exact-plan-after-owner-confirmation'},
+                'publisher': {'binding': 'existing-tag-triggered-OIDC', 'verification': 'resolved-in-preflight; no automatic reconfiguration'},
+                'credentials_are_server_side': True,
+                'note': 'Configured references are not proof of reachability or publication approval.'}
+
+    @app.get('/api/package/drafts/{draft_id}/task-package')
+    async def python_task_definition(request: Request, draft_id: str, revision: str | None = None):
+        try:
+            return packages.task_definition(await owner(request), draft_id, revision)
+        except FileNotFoundError:
+            raise HTTPException(404, detail='Python task definition is unavailable')
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.get('/api/package/drafts/{draft_id}/task-data.zip')
+    async def python_task_data_export(request: Request, draft_id: str):
+        import hashlib
+        try:
+            data = packages.export_task_data(await owner(request), draft_id)
+        except FileNotFoundError:
+            raise HTTPException(404, detail='Python task evidence is unavailable')
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+        return Response(data, media_type='application/zip', headers={
+            'Content-Disposition': f'attachment; filename="python-task-data-{draft_id}.zip"',
+            'X-Content-SHA256': hashlib.sha256(data).hexdigest()})
+
+    @app.get('/api/package/drafts/{draft_id}/task-package.zip')
+    async def python_task_definition_export(request: Request, draft_id: str, revision: str | None = None):
+        import hashlib
+        try:
+            data = packages.export_task(await owner(request), draft_id, revision)
+        except FileNotFoundError:
+            raise HTTPException(404, detail='Python task definition is unavailable')
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+        return Response(data, media_type='application/zip', headers={
+            'Content-Disposition': f'attachment; filename="python-task-{draft_id}.zip"',
+            'X-Content-SHA256': hashlib.sha256(data).hexdigest()})
+
     @app.post('/api/durable/research/auto')
     async def durable_auto_research(request: Request, body: dict):
         principal = await owner(request)
@@ -326,6 +422,84 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
             return {'runs': durable_tasks.runs(await owner(request), task_id)}
         except (KeyError, ValueError) as exc:
             durable_error(exc)
+
+    @app.get('/api/durable/tasks/{task_id}/package')
+    async def durable_package(request: Request, task_id: str, revision: str | None = None):
+        try:
+            return durable_tasks.package(await owner(request), task_id, revision)
+        except FileNotFoundError:
+            raise HTTPException(409, detail='task definition artifact is unavailable')
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.put('/api/durable/tasks/{task_id}/package')
+    async def durable_package_revise(request: Request, task_id: str, body: dict):
+        try:
+            return durable_tasks.revise_package(await owner(request), task_id, body)
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.get('/api/durable/tasks/{task_id}/package.zip')
+    async def durable_package_export(request: Request, task_id: str, revision: str | None = None):
+        import hashlib
+        try:
+            data = durable_tasks.export_package(await owner(request), task_id, revision)
+        except FileNotFoundError:
+            raise HTTPException(409, detail='task definition artifact is unavailable')
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+        return Response(data, media_type='application/zip', headers={
+            'Content-Disposition': f'attachment; filename="task-{task_id}.zip"',
+            'X-Content-SHA256': hashlib.sha256(data).hexdigest()})
+
+    @app.post('/api/durable/tasks/{task_id}/reuse')
+    async def durable_package_reuse(request: Request, task_id: str, body: dict):
+        try:
+            return durable_tasks.reuse_package(await owner(request), task_id, body)
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.get('/api/durable/tasks/{task_id}/runs/{run_id}/evaluations')
+    async def durable_evaluations(request: Request, task_id: str, run_id: str):
+        try:
+            return {'evaluations': durable_tasks.evaluations(await owner(request), task_id, run_id)}
+        except FileNotFoundError:
+            raise HTTPException(404, detail='round not found')
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.post('/api/durable/tasks/{task_id}/runs/{run_id}/evaluate')
+    async def durable_evaluate(request: Request, task_id: str, run_id: str, body: dict):
+        try:
+            return await durable_tasks.evaluate_package(await owner(request), task_id, run_id, body)
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.post('/api/durable/tasks/{task_id}/review')
+    async def durable_review(request: Request, task_id: str, body: dict):
+        try:
+            return durable_tasks.review_package(await owner(request), task_id, body)
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
+
+    @app.get('/api/durable/tasks/{task_id}/runs/{run_id}/data.zip')
+    async def durable_data_export(request: Request, task_id: str, run_id: str):
+        import hashlib
+        try:
+            principal = await owner(request)
+            durable_tasks.get(principal, task_id)
+            run = next(r for r in durable_tasks.runs(principal, task_id) if r['id'] == run_id)
+            receipt = run.get('data_archive', {})
+            if receipt.get('status') != 'ready':
+                raise HTTPException(409, detail='round data archive is not ready')
+            data = durable_tasks.store.artifact(run_id, receipt['name'])
+            if len(data) != receipt['size'] or hashlib.sha256(data).hexdigest() != receipt['sha256']:
+                raise HTTPException(409, detail='round data archive integrity check failed')
+        except (KeyError, ValueError, FileNotFoundError, StopIteration):
+            raise HTTPException(404, detail='round not found')
+        return Response(data, media_type='application/zip', headers={
+            'Content-Disposition': f'attachment; filename="task-{task_id}-run-{run_id}.zip"',
+            'X-Content-SHA256': receipt['sha256']})
 
     @app.post('/api/durable/tasks/{task_id}/resume')
     async def durable_resume(request: Request, task_id: str, body: dict):

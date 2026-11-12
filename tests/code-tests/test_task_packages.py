@@ -192,14 +192,15 @@ def test_preparation_success_does_not_make_a_timed_out_solver_quiescent(monkeypa
     from chattask.codex_tasks import CodexTaskExecutor,CodexRuntime
     from chattask.settings import TaskSettings
     from chattask.task_packages import initial_package
-    captures=[]
+    captures=[];preparation_prompts=[]
     class Commands:
         async def run(self,command,opts):
             if '> /workspace/agent-events.jsonl' in command:raise TimeoutError('synthetic in-flight solver')
             if 'capture_checkpoint.py' in command:captures.append(command)
             return N()
     class Files:
-        async def write_file(self,*args,**kwargs):pass
+        async def write_file(self,path,text,**kwargs):
+            if path=='/workspace/preparation-prompt.txt':preparation_prompts.append(text)
         async def read_file(self,path):
             if path.endswith('preparation-events.jsonl'):
                 return '\n'.join(json.dumps(e) for e in [{'type':'thread.started','thread_id':'prep-session'},{'type':'turn.completed'}])
@@ -226,6 +227,8 @@ def test_preparation_success_does_not_make_a_timed_out_solver_quiescent(monkeypa
     result=asyncio.run(exercise())
     assert not result['ok']
     assert captures==[], 'A completed preparation turn must not certify the next solver as stopped'
+    assert preparation_prompts and 'Do not call tools or run any commands' in preparation_prompts[0]
+    assert 'stdlib-only' in preparation_prompts[0]
 
 
 def test_null_preparation_cannot_be_certified_as_agent_generated(tmp_path):

@@ -1,6 +1,6 @@
 # 通用任务与镜像
 
-## 任务包生命周期（未发布候选）
+## 任务包生命周期（未发布候选） {#task-package-lifecycle}
 
 创建即初始化任务包，不是结束后才拼装 ZIP。`task.toml` 使用 Harbor 1.4 结构；目的、交付物、验收、模板和资源声明在 `metadata.chatarch` 扩展下。该适配器校验有限子集，不等于支持 Harbor 的全部环境/Agent 插件，也不会自动安装 Harbor/Rewardkit。
 
@@ -53,7 +53,7 @@ chattask task create --definition-dir ./example-task --image-profile python-pack
 
 这不增加另一个发布引擎，也不把选择模板或提交资源当成 push、PR、合版、标签、上传或生产重启许可。候选功能与已发布版本须分别验收。
 
-## 长期任务候选
+## 长期任务候选 {#durable-task-contract}
 
 长期 Task 与一次性 `chattask run` 独立：`POST /api/durable/tasks` 接受 `request_id`、`instructions`、`image_profile`，登录主体成为所有者；`GET /api/durable/tasks`、`/{id}`、`/{id}/runs` 返回私有历史。`POST /{id}/resume` 接受新的 `request_id`、`instructions` 和可选 `acknowledge_unknown=true`；`POST /{id}/pause`、`/{id}/complete` 接受 `request_id`。`POST /{id}/members` 仅所有者可授予已命名主体 `viewer` 或 `editor`，所有控制请求记载发起者。`GET /{id}/runs/{run_id}/artifacts/{name}` 在权限和 SHA256 核对后下载产物。路径均以 `/api/durable/tasks` 为前缀；所有写入使用已有站点 CSRF。请求 ID 重复且输入相同返回原结果，输入不同返回冲突；活动轮次不能重复接续。
 

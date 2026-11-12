@@ -1,6 +1,6 @@
 # Generic tasks and images
 
-## Task package lifecycle (unreleased candidate)
+## Task package lifecycle (unreleased candidate) {#task-package-lifecycle}
 
 A Task owns its definition from creation, not just a ZIP assembled afterward. `task.toml` uses the Harbor 1.4 structure with purpose, deliverables, acceptance and template/resource declarations under the `metadata.chatarch` extension. This adapter supports a bounded subset, not every Harbor environment or Agent plugin, and does not automatically install Harbor/Rewardkit.
 
@@ -53,7 +53,7 @@ The original PackageService still owns read-only preparation → exact target/pl
 
 This adds no second publishing engine. Selecting a template or providing resources grants no push, PR, merge, tag, upload or production-restart permission. Candidate functionality and published/live versions require separate acceptance.
 
-## Long-term Task candidate
+## Long-term Task candidate {#durable-task-contract}
 
 Long-term Tasks are separate from one-shot `chattask run`. `POST /api/durable/tasks` accepts `request_id`, `instructions` and `image_profile`; the authenticated principal becomes owner. `GET /api/durable/tasks`, `/{id}` and `/{id}/runs` return private history. `POST /{id}/resume` accepts a new `request_id`, `instructions` and optional `acknowledge_unknown=true`; `POST /{id}/pause` and `/{id}/complete` accept `request_id`. Owner-only `POST /{id}/members` grants a named principal `viewer` or `editor`. `GET /{id}/runs/{run_id}/artifacts/{name}` checks access and SHA256. These paths all start with `/api/durable/tasks`, and writes use the existing site CSRF protection. Equal repeated request IDs return the same result; changed input conflicts. An active round cannot be resumed again.
 

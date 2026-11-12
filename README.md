@@ -17,11 +17,11 @@ ChatTask 的主模型是 **任务 → Codex + Sandbox → 结果**。任务说�
 
 默认「任务」页从创建时就保存 `task.toml`、`instruction.md`、输入、Skill 与验证入口；支持导入、按版本修订、复用为新 Task、逐轮证据下载与显式人工验收。规范版本、运行完成、独立验证和人工接受是不同记录。任务库同时列出普通 Task 与 Python 发版 Task；旧记录不倒填规范、轨迹或评分。
 
-任务模板固定方法与验收逻辑，实例只改变参数。候选内置来源受限的报告模板和 Python 发版适配；发版 Task 复用原有只读预检 → 精确确认 → 受限发布 → CI/OIDC/PyPI/干净安装回读链。任务包提供模型、运行环境、仓库和 Publisher 的资源引用，不包含凭据或继承发布授权。详见[任务包生命周期与资源边界](docs/tasks.md#任务包生命周期未发布候选)。
+任务模板固定方法与验收逻辑，实例只改变参数。候选内置来源受限的报告模板和 Python 发版适配；发版 Task 复用原有只读预检 → 精确确认 → 受限发布 → CI/OIDC/PyPI/干净安装回读链。任务包提供模型、运行环境、仓库和 Publisher 的资源引用，不包含凭据或继承发布授权。详见[任务包生命周期与资源边界](docs/tasks.md#task-package-lifecycle)。
 
 ### 长期任务候选
 
-“长期任务”视图和 `chattask task` 命令保存稳定 Task 与逐轮 Run；独立 `chattask worker --env-profile site --operator operator` 处理队列。每轮保存受限的工作区与原生 Codex 会话检查点，后续轮次在新 Sandbox 原生接续。暂停是排队前或本轮结束时的协作式操作。生产部署须单独核验真实镜像、网关、原服务和浏览器；详见[长期任务合约](docs/tasks.md#长期任务候选)。
+“长期任务”视图和 `chattask task` 命令保存稳定 Task 与逐轮 Run；独立 `chattask worker --env-profile site --operator operator` 处理队列。每轮保存受限的工作区与原生 Codex 会话检查点，后续轮次在新 Sandbox 原生接续。暂停是排队前或本轮结束时的协作式操作。生产部署须单独核验真实镜像、网关、原服务和浏览器；详见[长期任务合约](docs/tasks.md#durable-task-contract)。
 
 显式选择 `research` 时，可提交已核对来源记录，也可通过受限的 arXiv 摘要自动检索创建；后者只保存摘要，不代表读过论文全文。受信 worker 在本轮原生执行及清理通过后，将 `result/research/main.tex` 等文件发布到配置的原 Overleaf 工程并核对源码；PDF 由独立隔离容器使用原服务镜像和只读公共 TeX 工具链编译，PDF/源码回读归入本轮产物。未知外部写入或编译清理结果保持阻塞，需显式同操作核对。普通开发任务不依赖 Overleaf 配置。
 

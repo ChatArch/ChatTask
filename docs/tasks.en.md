@@ -45,6 +45,16 @@ chattask task create --definition-dir ./example-task --image-profile python-pack
 
 The independent verifier starts a new Sandbox from the frozen definition and exact round outputs. Operators must provision required Python/Rewardkit/supported Codex judge dependencies. Missing dependencies or unavailable upstreams are verification errors, not evidence that content passed or failed. A configured model/image/gateway reference does not prove live availability.
 
+### Conversation submission
+
+An Agent can call authenticated `POST /api/task-intake` or use the thin HTTP client:
+
+```bash
+chattask task submit 'Build a tested utility with explicit deliverables' --request-id message-unique-id --env-profile site
+```
+
+The named profile supplies the existing site origin and login server-side. The API derives ownership from that login, selects the only configured image or requires an explicit `--image-profile`, and returns `task_id`, `status` and an exact authenticated `url`. Reuse the same message-derived request ID and payload after an uncertain response; do not create a second task blindly. Templates accept `--template research-report|python-package --parameters-file parameters.json`. Python publication creates a draft only: submission is not release approval. Trusted local `task create --owner ...` remains an operator surface, not remote authentication.
+
 ### Python publication is a Task
 
 Saving `python-package@1` parameters creates a package without dispatching publication. Model, environment, exact repository, OIDC Publisher and package-index resources remain references; server-side services issue existing constrained capabilities per stage. Established projects reuse their unchanged publishing chain instead of reopening PyPI login/Publisher setup.

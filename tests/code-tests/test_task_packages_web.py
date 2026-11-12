@@ -87,6 +87,39 @@ def test_task_page_exposes_definition_and_review_controls(tmp_path):
     asyncio.run(exercise())
 
 
+def test_conversation_intake_creates_owned_task_and_returns_exact_web_link(tmp_path):
+    app,durable=app_for(tmp_path)
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://testserver') as client:
+            headers={'X-Test-Principal':'owner','X-CSRF-Token':'synthetic-csrf'}
+            body={'request_id':'conversation-message-1','instructions':'实现一个有测试的小工具'}
+            first=await client.post('/api/task-intake',headers=headers,json=body)
+            assert first.status_code==200,first.text
+            value=first.json();ident=value['task_id']
+            assert value['url']=='http://testserver/?task='+ident
+            assert value['task']['owner']=='owner' and value['status']=='queued'
+            again=await client.post('/api/task-intake',headers=headers,json=body)
+            assert again.json()['task_id']==ident and len(durable.list('owner'))==1
+            assert (await client.post('/api/task-intake',json=body)).status_code in (401,403)
+            assert (await client.post('/api/task-intake',headers=headers,json={**body,'owner':'other'})).status_code==422
+            assert (await client.get('/?task='+ident)).headers['location'].endswith('next=%2F%3Ftask%3D'+ident)
+    asyncio.run(exercise())
+
+
+def test_conversation_intake_can_create_release_draft_without_publication(tmp_path):
+    app,_=app_for(tmp_path)
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://testserver') as client:
+            headers={'X-Test-Principal':'owner','X-CSRF-Token':'synthetic-csrf'}
+            spec={'mode':'existing','package_name':'example-taskpkg','module':'example_taskpkg','cli':'taskpkg','owner':'example-team','repository':'example-taskpkg','description':'Example','requirements':'Add tests','version':'0.2.1'}
+            response=await client.post('/api/task-intake',headers=headers,json={'request_id':'release-chat','template_id':'python-package','template_revision':1,'parameters':spec})
+            assert response.status_code==200,response.text
+            data=response.json();assert data['kind']=='python-package' and data['status']=='draft'
+            assert data['url']=='http://testserver/#package='+data['task_id']
+            assert data['task']['publish_task_id'] is None
+    asyncio.run(exercise())
+
+
 def test_template_catalog_python_task_resources_and_library_are_authenticated(tmp_path):
     app,_=app_for(tmp_path)
     async def exercise():

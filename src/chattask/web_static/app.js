@@ -253,6 +253,8 @@ async function initializeDurableTasks() {
     if (!images.images.length) show('durable-create-state', '未配置可用镜像或模型网关。', true);
     renderDurableHistory(history.tasks);
     await initializeTaskTemplates();
+    const requestedTask = new URLSearchParams(location.search).get('task');
+    if (requestedTask && /^[a-f0-9]{32}$/.test(requestedTask)) { await loadDurable(requestedTask); selectTab('durable'); return; }
     const first = history.tasks.find(task => task.kind !== 'python-package');
     if (first) await loadDurable(first.id);
   } catch (e) { show('durable-create-state', e.message, true); }

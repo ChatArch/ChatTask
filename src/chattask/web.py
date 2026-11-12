@@ -110,6 +110,9 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
                         ids = request.query_params.getlist('workspace_task')
                         if len(ids) == 1 and re.fullmatch(r'[0-9a-f]{32}', ids[0]):
                             target += '?workspace_task=' + ids[0]
+                        tasks = request.query_params.getlist('task')
+                        if len(tasks) == 1 and re.fullmatch(r'[0-9a-f]{32}', tasks[0]):
+                            target = '/?task=' + tasks[0]
                         return RedirectResponse('/auth/?' + urlencode({'next': target}), status_code=303)
                     raise
         except HTTPException as exc:
@@ -118,7 +121,7 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
             length = int(request.headers.get('content-length', '0'))
         except ValueError:
             return JSONResponse({'error': 'invalid content length'}, status_code=400)
-        limit = 65536 if integration or request.url.path == '/api/agent/tasks' or request.url.path.startswith('/api/package/') or request.url.path.startswith('/api/durable/') or request.url.path.startswith('/api/task-templates/') else 4096
+        limit = 65536 if integration or request.url.path in ('/api/agent/tasks','/api/task-intake') or request.url.path.startswith('/api/package/') or request.url.path.startswith('/api/durable/') or request.url.path.startswith('/api/task-templates/') else 4096
         if length > limit or length < 0:
             return JSONResponse({'error': 'request too large'}, status_code=413)
         if request.method in ('POST','PUT','PATCH'):
@@ -286,6 +289,32 @@ def create_app(settings: TaskSettings | None=None, *, service: TaskService | Non
         if isinstance(exc, ValueError):
             raise HTTPException(422, detail=str(exc))
         raise exc
+
+    @app.post('/api/task-intake')
+    async def conversation_task_intake(request: Request, body: dict):
+        try:
+            actor = await owner(request)
+            if set(body)-{'request_id','instructions','image_profile','template_id','template_revision','parameters'}:
+                raise ValueError('unknown intake field; identity and credentials are server-owned')
+            if 'template_id' in body:
+                if 'instructions' in body:raise ValueError('use template parameters or free instructions, not both')
+                value = await task_templates.instantiate(actor,body['template_id'],{k:v for k,v in body.items() if k!='template_id'})
+                kind = value.get('kind','durable')
+                task = value.get('draft',value)
+            else:
+                if set(body)&{'template_revision','parameters'}:raise ValueError('template parameters require a template_id')
+                image = body.get('image_profile')
+                if image is None:
+                    if len(durable_tasks.image_profiles)!=1:raise ValueError('select one operator image_profile from the available task resources')
+                    image = next(iter(durable_tasks.image_profiles))
+                if not isinstance(image,str):raise ValueError('image_profile must be a configured profile ID')
+                task = durable_tasks.create(actor,{'request_id':body.get('request_id'),'instructions':body.get('instructions'),'image_profile':image})
+                kind = 'durable'
+            path = '/#package='+task['id'] if kind=='python-package' else '/?task='+task['id']
+            return {'task_id':task['id'],'kind':kind,'status':task.get('status','draft'),
+                    'url':settings.origin+path,'task':task}
+        except (KeyError, ValueError) as exc:
+            durable_error(exc)
 
     @app.get('/api/task-templates')
     async def task_template_catalog(request: Request):

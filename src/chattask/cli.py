@@ -119,6 +119,34 @@ def task_group():
     """Control private long-term Tasks; rounds execute in a separate worker."""
 
 
+@task_group.command(name='submit')
+@click.argument('instructions',required=False)
+@click.option('--instructions-file',type=click.Path(exists=True,dir_okay=False,path_type=str))
+@click.option('--template',type=click.Choice(['research-report','python-package']),default=None)
+@click.option('--parameters-file',type=click.Path(exists=True,dir_okay=False,path_type=str))
+@click.option('--image-profile',default=None)
+@click.option('--request-id',required=True,help='Stable originating message ID; reuse unchanged after an uncertain response.')
+@click.option('-e','--env-profile',default=None)
+def task_submit(instructions,instructions_file,template,parameters_file,image_profile,request_id,env_profile):
+    """Submit natural language over authenticated HTTP and return its Web URL."""
+    import json
+    from pathlib import Path
+    from .intake import submit_task,IntakeUnknown
+    from .settings import load_settings
+    body={'request_id':request_id}
+    try:
+        if template:
+            if instructions or instructions_file or not parameters_file:raise ValueError('templates require --parameters-file, not free instructions')
+            body.update(template_id=template,template_revision=1,parameters=json.loads(Path(parameters_file).read_text()))
+        else:
+            if parameters_file or bool(instructions)==bool(instructions_file):raise ValueError('provide instructions or --instructions-file, exactly one')
+            body['instructions']=Path(instructions_file).read_text() if instructions_file else instructions
+        if image_profile:body['image_profile']=image_profile
+        result=submit_task(load_settings(profile=env_profile),body)
+    except (ValueError,OSError,IntakeUnknown) as exc:raise click.ClickException(str(exc)) from None
+    click.echo(json.dumps(result,ensure_ascii=False))
+
+
 @task_group.command(name='create')
 @click.argument('instructions', required=False)
 @click.option('--definition-dir', type=click.Path(exists=True, file_okay=False, path_type=str), help='Import a bounded UTF-8 task definition directory.')

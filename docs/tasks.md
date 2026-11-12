@@ -45,6 +45,19 @@ chattask task create --definition-dir ./example-task --image-profile python-pack
 
 独立 verifier 从冻结定义及本轮输出启动一个新 Sandbox；镜像须已包含任务需要的 Python/Rewardkit/受支持 Codex judge。缺依赖或上游不可用属于验证错误，不能伪装成内容不合格或合格。已配置的模型、镜像或网关引用不证明当前可用性。
 
+### 从对话直接创建
+
+对话 Agent 可调用认证 `POST /api/task-intake`，或使用同一 HTTP 客户端的薄 CLI：
+
+```bash
+chattask task submit '写一个带测试的小工具，说明目的和验收要求' \
+  --request-id message-unique-id --env-profile site
+```
+
+命名 `site` profile 通过原配置加载站点地址和账号，凭据不出现在命令参数或任务定义中。服务端按登录身份创建任务；当只有一个已配置镜像时自动选择，否则需明确 `--image-profile`。返回 JSON 中的 `task_id`、`status` 和 `url`；打开链接后登录即可查看该任务，不必手填网页表单。请求 ID 应来自原消息的稳定身份，响应不明时不得换新键重发。
+
+模板可用 `--template research-report|python-package --parameters-file parameters.json`；参数是相同模板字段的数据，不包含凭据。Python 发版只创建草稿，不因对话提交自动预检、合版或发布。已有可信服务器端 `task create --owner ...` 是本机管理入口，不能把它当作跨服务身份认证；对话/自动化优先使用 `task submit`。
+
 ### Python 发版也是 Task
 
 选择 `python-package@1` 后保存参数即生成任务包，不调度发布。资源包括模型、受控环境、精确仓库、OIDC Publisher 与包索引；只保存引用，服务端按阶段发放已有受限能力。既有项目默认复用原发布链，不重复登录 PyPI 或重建 Publisher。

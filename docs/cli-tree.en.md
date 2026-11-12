@@ -44,7 +44,8 @@ chattask
 │   ├── reconcile-research <TASK-ID> [--request-id REQUEST-ID] [--acknowledge-unknown] [--owner OWNER] [--env-profile ENV-PROFILE]  # Queue explicit same-round Research readback/reconciliation.
 │   ├── resume <TASK-ID> <INSTRUCTIONS> [--request-id REQUEST-ID] [--acknowledge-unknown] [--sources-file SOURCES-FILE] [--owner OWNER] [--env-profile ENV-PROFILE]  # Queue an explicit new native Codex round from a verified checkpoint.
 │   ├── review <TASK-ID> <RUN-ID> [--decision DECISION] [--expected-revision EXPECTED-REVISION] [--criteria-file CRITERIA-FILE] [--notes NOTES] [--request-id REQUEST-ID] [--owner OWNER] [--env-profile ENV-PROFILE]  # Record an explicit owner acceptance decision and its evidence notes.
-│   └── show <TASK-ID> [--owner OWNER] [--env-profile ENV-PROFILE]  # Show a Task and its immutable round history.
+│   ├── show <TASK-ID> [--owner OWNER] [--env-profile ENV-PROFILE]  # Show a Task and its immutable round history.
+│   └── submit [INSTRUCTIONS] [--instructions-file INSTRUCTIONS-FILE] [--template TEMPLATE] [--parameters-file PARAMETERS-FILE] [--image-profile IMAGE-PROFILE] [--request-id REQUEST-ID] [--env-profile ENV-PROFILE]  # Submit natural language over authenticated HTTP and return its Web URL.
 └── worker [--once] [--operator OPERATOR] [--env-profile ENV-PROFILE]  # Run the independent durable queue executor under a process-held lock.
 ```
 

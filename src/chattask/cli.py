@@ -120,22 +120,169 @@ def task_group():
 
 
 @task_group.command(name='create')
-@click.argument('instructions')
+@click.argument('instructions', required=False)
+@click.option('--definition-dir', type=click.Path(exists=True, file_okay=False, path_type=str), help='Import a bounded UTF-8 task definition directory.')
 @click.option('--image-profile', required=True)
 @click.option('--workflow', type=click.Choice(['development','research']), default='development', show_default=True)
 @click.option('--sources-file', type=click.Path(exists=True, dir_okay=False, path_type=str), help='JSON array of caller-verified research source records.')
 @click.option('--request-id', required=True)
 @click.option('--owner', required=True, help='Trusted local principal identity.')
 @click.option('-e', '--env-profile', default=None)
-def durable_create(instructions, image_profile, workflow, sources_file, request_id, owner, env_profile):
+def durable_create(instructions, definition_dir, image_profile, workflow, sources_file, request_id, owner, env_profile):
     """Queue the first round of a long-term Task."""
     import json
     from pathlib import Path
+    definition = None
+    if definition_dir:
+        from .task_packages import read_definition_directory
+        try:definition=read_definition_directory(definition_dir)
+        except (OSError,ValueError) as exc:raise click.ClickException(str(exc)) from exc
+        if instructions is None:instructions=definition['instruction.md']
+    if not instructions:
+        raise click.UsageError('Provide instructions or --definition-dir.')
     body={'instructions': instructions, 'image_profile': image_profile, 'request_id': request_id, 'workflow': workflow}
+    if definition is not None:body['definition']=definition
     if sources_file:
         try:body['source_records']=json.loads(Path(sources_file).read_text(encoding='utf-8'))
         except (OSError,ValueError) as exc:raise click.ClickException('invalid research sources JSON file') from exc
     _durable_call('create', env_profile, owner, body)
+
+
+def _task_actor_options(function):
+    function=click.option('-e','--env-profile',default=None)(function)
+    return click.option('--owner',required=True,help='Trusted local principal identity.')(function)
+
+
+@task_group.group(name='package')
+def task_package_group():
+    """Initialize, validate, version, export and reuse portable task definitions."""
+
+
+@task_package_group.command(name='init')
+@click.argument('directory',type=click.Path(path_type=str))
+@click.argument('instructions')
+@click.option('--image',required=True,help='Image reference for the draft, not permission to pull or execute it.')
+def task_package_init(directory,instructions,image):
+    """Create a new task.toml, instruction.md and verifier draft without model calls."""
+    import json
+    from .task_packages import initialize_definition_directory
+    try:result=initialize_definition_directory(directory,instructions,image)
+    except (OSError,ValueError) as exc:raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(result,ensure_ascii=False))
+
+
+@task_package_group.command(name='validate')
+@click.argument('directory',type=click.Path(exists=True,file_okay=False,path_type=str))
+@click.option('--official',is_flag=True,help='Additionally require an installed Harbor 0.25.0 schema validator.')
+def task_package_validate(directory,official):
+    """Validate the supported file contract; does not execute a task or verifier."""
+    import json
+    from .task_packages import read_definition_directory,validate_files,summary,tomllib
+    try:
+        files=read_definition_directory(directory);result=summary(validate_files(files))
+        result['official_schema_checked']=False
+        if official:
+            from importlib.metadata import version
+            from harbor.models.task.config import TaskConfig
+            if version('harbor')!='0.25.0':raise ValueError('official validation is pinned to Harbor 0.25.0')
+            TaskConfig.model_validate(tomllib.loads(files['task.toml']))
+            result['official_schema_checked']=True
+    except ImportError as exc:
+        raise click.ClickException('Optional Harbor 0.25.0 validator is not installed; normal validation needs no framework install.') from exc
+    except (OSError,ValueError) as exc:raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(result,ensure_ascii=False))
+
+
+@task_package_group.command(name='show')
+@click.argument('task_id')
+@click.option('--revision',default=None)
+@_task_actor_options
+def task_package_show(task_id,revision,owner,env_profile):
+    """Read the selected immutable definition visible to this principal."""
+    _durable_call('package',env_profile,owner,task_id,revision)
+
+
+@task_package_group.command(name='revise')
+@click.argument('task_id')
+@click.option('--definition-dir',required=True,type=click.Path(exists=True,file_okay=False,path_type=str))
+@click.option('--expected-revision',required=True)
+@click.option('--request-id',required=True)
+@_task_actor_options
+def task_package_revise(task_id,definition_dir,expected_revision,request_id,owner,env_profile):
+    """Publish a CAS-checked definition revision without rewriting old rounds."""
+    from .task_packages import read_definition_directory
+    try:files=read_definition_directory(definition_dir)
+    except (OSError,ValueError) as exc:raise click.ClickException(str(exc)) from exc
+    _durable_call('revise_package',env_profile,owner,task_id,
+                  {'request_id':request_id,'expected_revision':expected_revision,'definition':files})
+
+
+@task_package_group.command(name='export')
+@click.argument('task_id')
+@click.option('--revision',default=None)
+@click.option('--output',required=True,type=click.Path(path_type=str),help='New private ZIP file; existing files are never overwritten.')
+@_task_actor_options
+def task_package_export(task_id,revision,output,owner,env_profile):
+    """Export a real definition ZIP, excluding session state and credentials."""
+    import hashlib,json,os
+    from pathlib import Path
+    try:
+        data=_durable_service(env_profile).export_package(owner,task_id,revision)
+        target=Path(output)
+        fd=os.open(target,os.O_CREAT|os.O_EXCL|os.O_WRONLY|getattr(os,'O_NOFOLLOW',0),0o600)
+        with os.fdopen(fd,'wb') as stream:stream.write(data)
+    except (KeyError,ValueError,OSError) as exc:raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps({'file':str(target),'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}))
+
+
+@task_package_group.command(name='reuse')
+@click.argument('task_id')
+@click.option('--request-id',required=True)
+@_task_actor_options
+def task_package_reuse(task_id,request_id,owner,env_profile):
+    """Create and queue a new private Task without inheriting review or grants."""
+    _durable_call('reuse_package',env_profile,owner,task_id,{'request_id':request_id})
+
+
+@task_group.command(name='evaluate')
+@click.argument('task_id')
+@click.argument('run_id')
+@click.option('--request-id',required=True)
+@_task_actor_options
+def task_evaluate(task_id,run_id,request_id,owner,env_profile):
+    """Request independent verification; unavailable is never a passing score."""
+    import asyncio,json
+    try:result=asyncio.run(_durable_service(env_profile).evaluate_package(owner,task_id,run_id,{'request_id':request_id}))
+    except (KeyError,ValueError,OSError) as exc:raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(result,ensure_ascii=False))
+
+
+@task_group.command(name='evaluations')
+@click.argument('task_id')
+@click.argument('run_id')
+@_task_actor_options
+def task_evaluations(task_id,run_id,owner,env_profile):
+    """Read persisted evaluation history for one exact round."""
+    _durable_call('evaluations',env_profile,owner,task_id,run_id)
+
+
+@task_group.command(name='review')
+@click.argument('task_id')
+@click.argument('run_id')
+@click.option('--decision',required=True,type=click.Choice(['accepted','changes_requested']))
+@click.option('--expected-revision',required=True)
+@click.option('--criteria-file',required=True,type=click.Path(exists=True,dir_okay=False,path_type=str),help='JSON object mapping criterion IDs to explicit boolean decisions.')
+@click.option('--notes',required=True)
+@click.option('--request-id',required=True)
+@_task_actor_options
+def task_review(task_id,run_id,decision,expected_revision,criteria_file,notes,request_id,owner,env_profile):
+    """Record an explicit owner acceptance decision and its evidence notes."""
+    import json
+    from pathlib import Path
+    try:criteria=json.loads(Path(criteria_file).read_text(encoding='utf-8'))
+    except (OSError,ValueError) as exc:raise click.ClickException('invalid criterion decisions JSON') from exc
+    _durable_call('review_package',env_profile,owner,task_id,{'request_id':request_id,'run_id':run_id,
+                  'decision':decision,'expected_revision':expected_revision,'criteria':criteria,'notes':notes})
 
 
 @task_group.command(name='list')

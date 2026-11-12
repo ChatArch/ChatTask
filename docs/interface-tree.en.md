@@ -25,6 +25,12 @@ chattask
 ├── release.ChatGHReleaseAdapter   # Merged PR, checks, tag write/reconciliation
 ├── workspace_analysis.WorkspaceAnalysis  # Independent material drafts/Runs/digest-checked reports
 ├── durable.DurableTaskService  # create/list/get/runs/resume/pause/complete/grant/artifact/worker_once
+│   └── package/revise_package/export_package/reuse_package/evaluate_package/evaluations/review_package
+├── task_packages  # validate_files/read_definition_directory/definition_zip/run_archive
+├── task_templates.TaskTemplateService  # catalog/instantiate/library; references are not grants
+├── package_service.PackageService  # Existing release workflow plus task_definition/export_task/export_task_data
+├── task_verification.SandboxPackageVerifier  # Independent Sandbox verification and cleanup reconciliation
+├── task_trajectories.codex_to_atif  # Converts only actually observed native events
 ├── durable.executor_lock / run_worker  # Process-held single writer and separate queue executor
 ├── durable_archive.validate_checkpoint  # Private archive structure, limits and live-token scan
 ├── durable_research.source_records / research_files  # Bounded supplied sources and round output adapter

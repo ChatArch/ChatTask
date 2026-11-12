@@ -1,5 +1,58 @@
 # 通用任务与镜像
 
+## 任务包生命周期（未发布候选）
+
+创建即初始化任务包，不是结束后才拼装 ZIP。`task.toml` 使用 Harbor 1.4 结构；目的、交付物、验收、模板和资源声明在 `metadata.chatarch` 扩展下。该适配器校验有限子集，不等于支持 Harbor 的全部环境/Agent 插件，也不会自动安装 Harbor/Rewardkit。
+
+```text
+task.toml                         # 结构化入口、目的、交付物和逐项验收
+instruction.md                    # 给执行 Agent 的完整说明
+inputs/                           # 参数、来源和资源引用；无凭据
+environment/skills/<name>/SKILL.md # 可选任务范围方法，不是全局授权
+tests/test.sh                     # 独立 verifier 入口，只在新 Sandbox 执行
+tests/checks.py                    # 程序检查（按任务需要提供）
+tests/quality.toml                 # 可选模型 rubric
+tests/judge-guide.md               # 可选评审指南
+```
+
+自然语言任务先保存待准备定义，再由 Agent 补齐检查/rubric；服务端冻结定义版本后才求解。导入的完整定义无需重新准备。运行结束、独立验证和人工接受分别存储；缺失条目、verifier 异常、未评审及清理未知均不算通过，必需条目不因平均分较高而被忽略。执行中不能改写冻结标准；后续修订用 CAS 创建新版本，旧 Run 不变。
+
+每轮私有数据单元保存对应定义、实际事件/可观察 ATIF、交付物、reward/details 和验收决定；原生 checkpoint 只用于续跑，不进入可复用导出。复用创建新 Task，不复制原账号、检查点、评分或授权。失败记录同样保留；任务库不是公开数据集。ATIF 是事件交换格式，不是原生会话恢复格式。
+
+网页支持文本定义文件导入、规范编辑/取消/修订、任务库筛选、复用、定义与本轮证据下载、显式人工验收。程序 API 由 `DurableTaskService`、`TaskTemplateService` 与 `PackageService` 提供；CLI 以真实 `chattask --tree` 为准：
+
+```bash
+chattask task package init ./example-task '实现一个有测试的小工具' --image '<operator-image>'
+chattask task package validate ./example-task
+chattask task create --definition-dir ./example-task --image-profile python-package \
+  --request-id example-create --owner operator --env-profile site
+```
+
+`validate --official` 额外要求运行环境已有固定 Harbor 0.25.0 schema；默认本地校验明确返回 `official_schema_checked=false`，不执行任务。定义最多 64 个 UTF-8 文件/256 KiB，不跟随符号链接。HTTP 请求体另有独立限制。
+
+| 接口 | 作用 |
+|---|---|
+| `GET /api/task-templates` | 固定模板及显式版本、参数约束 |
+| `POST /api/task-templates/{id}/instantiate` | `request_id`、`template_revision`、`parameters`；普通模板另选已登记 `image_profile` |
+| `GET /api/task-resources` | 资源是否配置；不探测可用性、不返回秘密 |
+| `GET /api/task-library` | 当前身份可见的普通 Task 与 Python 发版 Task，最多 100 项 |
+| `GET/PUT /api/durable/tasks/{id}/package` | 读取定义、按 `expected_revision` 和稳定 `request_id` 保存新 `files` |
+| `GET /api/durable/tasks/{id}/package.zip` | 下载定义；可选 `revision` |
+| `POST /api/durable/tasks/{id}/reuse` | 新私有实例，不继承通过状态 |
+| `POST /api/durable/tasks/{id}/runs/{run}/evaluate` | 持久排队，独立 worker 执行，不在 HTTP 请求内运行脚本 |
+| `GET /api/durable/tasks/{id}/runs/{run}/evaluations` | 原轮次的验证历史 |
+| `POST /api/durable/tasks/{id}/review` | `request_id`、`run_id`、`expected_revision`、`decision`、逐项 `criteria`、`notes` 的显式人工决定 |
+
+独立 verifier 从冻结定义及本轮输出启动一个新 Sandbox；镜像须已包含任务需要的 Python/Rewardkit/受支持 Codex judge。缺依赖或上游不可用属于验证错误，不能伪装成内容不合格或合格。已配置的模型、镜像或网关引用不证明当前可用性。
+
+### Python 发版也是 Task
+
+选择 `python-package@1` 后保存参数即生成任务包，不调度发布。资源包括模型、受控环境、精确仓库、OIDC Publisher 与包索引；只保存引用，服务端按阶段发放已有受限能力。既有项目默认复用原发布链，不重复登录 PyPI 或重建 Publisher。
+
+发版继续由原 PackageService 执行：只读预检 → 精确目标/计划确认 → 受限发布 → 独立回读。阶段记录绑定原生任务 ID、草稿修订和定义版本；参数变更使旧预检/确认失效，不覆盖旧规范。`task-package` / `task-package.zip`（在 `/api/package/drafts/{id}/` 下）提供定义读取/下载，`task-data.zip` 导出版本化定义、真实阶段状态、可信校验/发布回执及其他产物的摘要引用；任意工作区和原生会话不会被自动复制。程序发布核验不等于人工业务验收。
+
+这不增加另一个发布引擎，也不把选择模板或提交资源当成 push、PR、合版、标签、上传或生产重启许可。候选功能与已发布版本须分别验收。
+
 ## 长期任务候选
 
 长期 Task 与一次性 `chattask run` 独立：`POST /api/durable/tasks` 接受 `request_id`、`instructions`、`image_profile`，登录主体成为所有者；`GET /api/durable/tasks`、`/{id}`、`/{id}/runs` 返回私有历史。`POST /{id}/resume` 接受新的 `request_id`、`instructions` 和可选 `acknowledge_unknown=true`；`POST /{id}/pause`、`/{id}/complete` 接受 `request_id`。`POST /{id}/members` 仅所有者可授予已命名主体 `viewer` 或 `editor`，所有控制请求记载发起者。`GET /{id}/runs/{run_id}/artifacts/{name}` 在权限和 SHA256 核对后下载产物。路径均以 `/api/durable/tasks` 为前缀；所有写入使用已有站点 CSRF。请求 ID 重复且输入相同返回原结果，输入不同返回冲突；活动轮次不能重复接续。

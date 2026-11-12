@@ -211,7 +211,29 @@ $('sandbox-tab').addEventListener('click', () => selectTab('sandbox'));
 let durableSelected = null;
 let durableCreateRequest = null;
 let durableResumeRequest = null;
+let durablePackage = null;
+let durableLibrary = [];
+let durableImportFiles = null;
+let durableImportSequence = 0;
+let durablePackageDirty = false;
+let durableSelectionSequence = 0;
+let durableLatestRun = null;
+let taskLibrarySelectedRef = '';
+let pendingPythonTemplate = false;
+const durablePackageRequests = new Map();
 function clearDurableState() {
+  durableSelectionSequence += 1;
+  durableImportSequence += 1; durablePackageDirty = false;
+  durablePackage = null; durableLatestRun = null; durableLibrary = []; durableImportFiles = null;
+  durablePackageRequests.clear(); clearPackageRendering();
+  taskLibrarySelectedRef = ''; pendingPythonTemplate = false;
+  $('task-template-picker').value = '';
+  $('task-template-fields').hidden = true;
+  $('task-template-title').value = ''; $('task-template-sources').value = '';
+  $('task-resource-summary').textContent = '资源在服务端解析，凭据不进入任务定义。';
+  $('durable-package-files').value = '';
+  $('durable-package-import-state').textContent = '';
+  $('durable-library-search').value = '';
   durableSelected = null; durableCreateRequest = null; durableResumeRequest = null;
   $('durable-history').replaceChildren(option('', '选择任务'));
   $('durable-runs').replaceChildren();
@@ -224,13 +246,15 @@ function clearDurableState() {
 }
 async function initializeDurableTasks() {
   try {
-    const [images, history, queue] = await Promise.all([request('/api/agent/images'), request('/api/durable/tasks'), request('/api/durable/worker-state')]);
+    const [images, history, queue] = await Promise.all([request('/api/agent/images'), request('/api/task-library'), request('/api/durable/worker-state')]);
     renderDurableWorkerState(queue);
     $('durable-image').replaceChildren(...images.images.map(i => option(i.id, i.id)));
     $('durable-create').disabled = !images.images.length;
     if (!images.images.length) show('durable-create-state', '未配置可用镜像或模型网关。', true);
     renderDurableHistory(history.tasks);
-    if (history.tasks.length) await loadDurable(history.tasks[0].id);
+    await initializeTaskTemplates();
+    const first = history.tasks.find(task => task.kind !== 'python-package');
+    if (first) await loadDurable(first.id);
   } catch (e) { show('durable-create-state', e.message, true); }
 }
 function renderDurableWorkerState(queue) {
@@ -239,17 +263,29 @@ function renderDurableWorkerState(queue) {
     `待处理轮次 ${queue.pending}；此视图不表示独立 worker 已在线。`;
 }
 function renderDurableHistory(tasks) {
+  durableLibrary = tasks;
   const picker = $('durable-history');
-  const old = durableSelected && durableSelected.id;
+  const old = taskLibrarySelectedRef || (durableSelected && durableSelected.id);
+  const query = $('durable-library-search').value.trim().toLocaleLowerCase();
   picker.replaceChildren(option('', '选择任务'));
-  tasks.forEach(t => picker.append(option(t.id, `${t.goal.slice(0, 45)} · ${t.workflow || 'development'} · ${t.status}`)));
-  if (old && tasks.some(t => t.id === old)) picker.value = old;
+  const reference = task => task.kind === 'python-package' ? 'python-package:' + task.id : task.id;
+  tasks.filter(t => reference(t) === old || !query || `${t.goal} ${t.status} ${t.review?.decision || ''}`.toLocaleLowerCase().includes(query))
+    .forEach(t => picker.append(option(reference(t), `${t.kind === 'python-package' ? 'Python 发版 · ' : ''}${t.goal.slice(0, 45)} · ${t.status}`)));
+  if (old && tasks.some(t => reference(t) === old)) picker.value = old;
 }
 async function loadDurable(id) {
-  if (!id) { durableSelected = null; show('durable-state', '选择长期任务查看。'); return; }
+  if (durablePackageDirty && !window.confirm('规范有未保存的修改。是否放弃这些修改并读取所选任务？')) {
+    $('durable-history').value = durableSelected?.id || ''; return;
+  }
+  durablePackageDirty = false;
+  const sequence = ++durableSelectionSequence;
+  durablePackage = null; durableLatestRun = null; clearPackageRendering();
+  if (!id) { durableSelected = null; show('durable-state', '选择任务查看。'); return; }
   try {
     const [task, history] = await Promise.all([request(`/api/durable/tasks/${id}`), request(`/api/durable/tasks/${id}/runs`)]);
+    if (sequence !== durableSelectionSequence || !authenticated) return;
     durableSelected = task;
+    taskLibrarySelectedRef = id;
     $('durable-history').value = id;
     const status = task.status === 'queued' ? '已排队 · 等待独立 worker' :
       task.status === 'running' && task.pause_requested ? '运行中 · 已请求本轮结束后暂停' :
@@ -282,18 +318,37 @@ async function loadDurable(id) {
         link.textContent = `${artifact.name} · ${artifact.size} 字节`;
         item.append(link);
       });
+      const verification = document.createElement('p');
+      verification.className = 'meta-note';
+      verification.textContent = `独立验证：${run.evaluation?.status || '未执行'} · 人工验收：${run.review?.decision || '未确认'}`;
+      item.append(verification);
+      if (run.data_archive?.status === 'ready') {
+        const dataLink = document.createElement('a');
+        dataLink.href = `/api/durable/tasks/${id}/runs/${run.id}/data.zip`;
+        dataLink.textContent = '下载本轮任务单元（定义、交付与评测证据）';
+        item.append(dataLink);
+      }
       list.append(item);
     });
     const latest = history.runs.at(-1);
+    durableLatestRun = latest || null;
     $('durable-reconcile').hidden = !(task.workflow === 'research' && latest && latest.research_outcome_unknown);
     $('durable-resume').disabled = ['queued', 'running', 'reconciling'].includes(task.status) || !!(latest && latest.research_outcome_unknown);
     $('durable-pause').disabled = !['queued', 'running'].includes(task.status);
     $('durable-complete').disabled = ['queued', 'running', 'reconciling'].includes(task.status);
-  } catch (e) { show('durable-state', e.message, true); }
+    try {
+      const definition = await request(`/api/durable/tasks/${id}/package`);
+      if (sequence !== durableSelectionSequence || durableSelected?.id !== id || !authenticated) return;
+      durablePackage = definition;
+      renderTaskPackage(task, definition, latest);
+    } catch (e) {
+      if (sequence === durableSelectionSequence) show('durable-package-state', `规范读取失败：${e.message}。不会显示其他任务的定义。`, true);
+    }
+  } catch (e) { if (sequence === durableSelectionSequence) show('durable-state', e.message, true); }
 }
-$('durable-history').addEventListener('change', e => loadDurable(e.target.value));
+$('durable-history').addEventListener('change', e => openTaskLibraryEntry(e.target.value));
 $('durable-refresh').addEventListener('click', async () => {
-  try { const [history, queue] = await Promise.all([request('/api/durable/tasks'), request('/api/durable/worker-state')]); renderDurableHistory(history.tasks); renderDurableWorkerState(queue); if (durableSelected) await loadDurable(durableSelected.id); }
+  try { const [history, queue] = await Promise.all([request('/api/task-library'), request('/api/durable/worker-state')]); renderDurableHistory(history.tasks); renderDurableWorkerState(queue); if (durableSelected) await loadDurable(durableSelected.id); }
   catch (e) { show('durable-state', e.message, true); }
 });
 $('durable-goal').addEventListener('input', () => { durableCreateRequest = null; });
@@ -314,15 +369,33 @@ $('durable-create').addEventListener('click', async () => {
   if (!instructions) return show('durable-create-state', '请输入目标。', true);
   durableCreateRequest ||= crypto.randomUUID();
   try {
+    const template = $('task-template-picker').value;
+    if (template === 'python-package') { selectTab('package'); throw new Error('请在 Python 发版参数编辑器保存 Task，不能用自由任务绕过发布授权。'); }
+    if (template === 'research-report') {
+      if (durableImportFiles) throw new Error('固定模板不能同时导入另一套验收文件。');
+      const parameters = {title: $('task-template-title').value.trim(), requirements: instructions,
+        language: $('task-template-language').value, output_name: $('task-template-output').value,
+        sources: JSON.parse($('task-template-sources').value || '[]')};
+      const task = await request('/api/task-templates/research-report/instantiate', 'POST',
+        {request_id: durableCreateRequest, template_revision: 1, image_profile: $('durable-image').value, parameters});
+      durableCreateRequest = null;
+      const history = await request('/api/task-library'); renderDurableHistory(history.tasks); await loadDurable(task.id);
+      show('durable-create-state', '已按固定模板创建独立 Task，参数、来源和验收代码已冻结。'); return;
+    }
     const workflow = $('durable-workflow').value;
     const body = {request_id: durableCreateRequest, instructions, image_profile: $('durable-image').value, workflow};
+    if (durableImportFiles) body.definition = durableImportFiles;
     const auto = workflow === 'research' && $('durable-auto-source').checked;
     if (workflow === 'research' && !auto) body.source_records = JSON.parse($('durable-sources').value);
-    if (auto) { body.query = $('durable-query').value.trim(); body.max_results = 3; delete body.workflow; }
+    if (auto) {
+      if (durableImportFiles) throw new Error('自动发现来源与导入任务包请分开使用；可先创建规范任务后补充来源。');
+      body.query = $('durable-query').value.trim(); body.max_results = 3; delete body.workflow;
+    }
+    if (new TextEncoder().encode(JSON.stringify(body)).length > 65536) throw new Error('任务请求超过 Web 的 64 KiB 限制，请精简材料或使用 CLI。');
     const task = await request(auto ? '/api/durable/research/auto' : '/api/durable/tasks', 'POST', body);
     durableCreateRequest = null;
     show('durable-create-state', auto ? '摘要来源已自动发现并保存；请核对相关性。研究任务已排队。' : '任务已排队，等待独立 worker。');
-    const history = await request('/api/durable/tasks'); renderDurableHistory(history.tasks); await loadDurable(task.id);
+    const history = await request('/api/task-library'); renderDurableHistory(history.tasks); await loadDurable(task.id);
   } catch (e) { show('durable-create-state', e.message, true); }
 });
 $('durable-resume').addEventListener('click', async () => {
@@ -358,6 +431,228 @@ $('durable-reconcile').addEventListener('click', async () => {
       {request_id: crypto.randomUUID(), acknowledge_unknown: true});
     await loadDurable(durableSelected.id);
   } catch (e) { show('durable-state', e.message, true); }
+});
+
+async function initializeTaskTemplates() {
+  try {
+    const [catalog, resources] = await Promise.all([request('/api/task-templates'), request('/api/task-resources')]);
+    if (!authenticated) return;
+    const picker = $('task-template-picker');
+    picker.replaceChildren(option('', '自由任务（初始化后完善规范）'), ...catalog.templates.map(template => option(template.id, `${template.name} · v${template.revision}`)));
+    picker.disabled = false;
+    $('task-template-state').textContent = '模板固定方法、环境约束和验收逻辑；每次填写参数生成独立 Task。';
+    $('task-resource-summary').textContent = `模型入口：${resources.model.configured ? '已配置，尚未实测可用性' : '未配置'}；镜像配置：${resources.image_profiles.map(image => image.id).join('、') || '无'}；工具网关：${resources.gateway.configured ? '已配置，按阶段授予' : '未配置'}。Publisher 复用既有 OIDC 链；资源声明不等于发布许可。`;
+  } catch (error) { show('task-template-state', `模板目录暂不可用：${error.message}；自由任务仍可按已有配置创建。`, true); }
+}
+async function openTaskLibraryEntry(reference) {
+  if (!reference.startsWith('python-package:')) return loadDurable(reference);
+  const id = reference.slice('python-package:'.length);
+  if (!/^[a-f0-9]{32}$/.test(id)) return;
+  if (durablePackageDirty && !window.confirm('规范有未保存修改。是否放弃并查看 Python 发版任务？')) return;
+  if (packageDraft && packageDraft.id !== id && packageDirty() && !window.confirm('发包参数有未保存修改。是否放弃并查看所选任务？')) return;
+  durablePackageDirty = false; durableSelectionSequence += 1;
+  durableSelected = null; durablePackage = null; clearPackageRendering();
+  taskLibrarySelectedRef = reference;
+  selectTab('package');
+  if (!packageSchema) { show('package-state', '参数编辑器正在载入，请载入后从任务库重新选择。'); return; }
+  await loadPackage(id);
+}
+$('task-template-picker').addEventListener('change', async event => {
+  durableCreateRequest = null;
+  const selected = event.target.value;
+  $('task-template-fields').hidden = selected !== 'research-report';
+  $('durable-workflow').disabled = !!selected;
+  $('durable-package-files').disabled = !!selected;
+  if (selected) { durableImportSequence += 1; durableImportFiles = null; $('durable-package-files').value = ''; }
+  $('durable-create').textContent = selected === 'research-report' ? '按固定模板创建并排队' : '创建并排队';
+  $('durable-create').disabled = selected === 'python-package' || !authenticated || !$('durable-image').value;
+  if (selected === 'research-report') {
+    $('durable-workflow').value = 'development'; $('durable-sources-box').hidden = true;
+    $('task-template-state').textContent = '固定报告方法和验证代码；变化的是题目、要求、来源与语言。没有来源时不得声称读过文献。';
+  } else if (selected === 'python-package') {
+    selectTab('package');
+    if (!packageSchema) { pendingPythonTemplate = true; show('package-state', '正在载入 Python 发版 Task 参数表单；保存不会自动发布。'); return; }
+    if (packageDraft && packageDirty() && !window.confirm('发包参数尚未保存。是否放弃并创建新的发版 Task？')) return;
+    await loadPackage(''); fillPackage({...packageSchema.defaults, mode: 'existing'});
+    show('package-state', '填写目标和功能要求后保存为独立 Task。预检只读，发布必须另外确认精确计划。');
+  }
+});
+for (const name of ['title', 'language', 'output', 'sources']) $('task-template-' + name).addEventListener('input', () => { durableCreateRequest = null; });
+
+function clearPythonTaskUnit() {
+  $('python-task-purpose').textContent = '';
+  for (const name of ['resources', 'acceptance', 'stages']) $('python-task-' + name).replaceChildren();
+  $('python-task-export').hidden = true; $('python-task-export').removeAttribute('href');
+  $('python-task-data').hidden = true; $('python-task-data').removeAttribute('href');
+  $('python-task-state').textContent = '保存参数后创建发版 Task；不会自动创建仓库、标签或执行上传。';
+}
+function renderPythonTaskUnit(draft) {
+  clearPythonTaskUnit();
+  const definition = draft.task_package;
+  if (!definition) { $('python-task-state').textContent = '旧格式发包记录保留；没有补造历史任务规范或评分。'; return; }
+  $('python-task-state').textContent = `Task ${draft.id} · 模板 ${definition.template.id}@${definition.template.revision} · 规范 ${definition.revision.slice(0, 12)} · ${draft.publish_verified ? '机器发布核验通过；人工业务验收单独判断' : draft.preview ? '预检通过，等待精确确认' : '等待预检与资源核对'}`;
+  $('python-task-purpose').textContent = definition.purpose;
+  const kinds = {model:'模型', environment:'受控运行环境', repository:'仓库', publisher:'发布渠道', 'package-index':'包索引与产物'};
+  (definition.resources || []).forEach(resource => {
+    const item = document.createElement('li');
+    item.textContent = `${kinds[resource.kind] || resource.kind}：${resource.ref} · ${resource.access} · ${resource.verification}`;
+    $('python-task-resources').append(item);
+  });
+  (definition.acceptance || []).forEach(criterion => {
+    const item = document.createElement('li'); item.textContent = `${criterion.id} · ${criterion.description} · ${criterion.method === 'human' ? '人工业务复核' : '可信回执与脚本检查'}`;
+    $('python-task-acceptance').append(item);
+  });
+  (draft.task_stages || []).forEach(stage => {
+    const item = document.createElement('li');
+    const label = {prepare:'只读预检',publish:'已确认目标的发布',verify:'只读重新核验'}[stage.kind] || stage.kind;
+    item.textContent = `${label} · 草稿修订 ${stage.draft_revision} · 规范 ${stage.definition_revision.slice(0, 12)} · ${stage.native_task_id || '任务关联待回读'}`;
+    $('python-task-stages').append(item);
+  });
+  const link = $('python-task-export'); link.hidden = false;
+  link.href = `/api/package/drafts/${draft.id}/task-package.zip?revision=${encodeURIComponent(definition.revision)}`;
+  $('python-task-data').hidden = false; $('python-task-data').href = `/api/package/drafts/${draft.id}/task-data.zip`;
+}
+
+function clearPackageRendering() {
+  $('durable-package-purpose').textContent = '';
+  $('durable-package-deliverables').replaceChildren();
+  $('durable-package-acceptance').replaceChildren();
+  $('durable-package-toml').value = '';
+  $('durable-package-instruction').value = '';
+  $('durable-package-review-notes').value = '';
+  $('durable-package-decision').value = 'changes_requested';
+  for (const name of ['toml', 'instruction', 'save', 'cancel', 'reuse', 'review']) $('durable-package-' + name).disabled = true;
+  $('durable-package-export').hidden = true;
+  $('durable-package-export').removeAttribute('href');
+  show('durable-package-state', '选择任务后显示对应的规范与版本。');
+}
+function renderTaskPackage(task, definition, latest) {
+  const legacy = definition.legacy;
+  const editable = !legacy && definition.permissions?.edit && !['running', 'reconciling'].includes(task.status);
+  const reviewable = !legacy && definition.permissions?.review && latest &&
+    latest.package_revision === definition.revision && ['completed', 'blocked', 'interrupted'].includes(latest.status);
+  show('durable-package-state', legacy ? '旧格式任务 · 原记录保留；没有补造历史测试或评分。' :
+    `规范版本 ${definition.revision.slice(0, 12)} · ${definition.preparation === 'pending' ? '初始化草稿，尚未完成 Agent 准备' : definition.preparation} · 独立验证 ${latest?.evaluation?.status || '未执行'} · 人工验收 ${latest?.review?.decision || '未确认'}`);
+  $('durable-package-purpose').textContent = definition.purpose || task.goal;
+  const deliverables = $('durable-package-deliverables');
+  (definition.deliverables.length ? definition.deliverables : ['尚未明确交付清单，需补充。']).forEach(text => {
+    const li = document.createElement('li'); li.textContent = text; deliverables.append(li);
+  });
+  const criteria = $('durable-package-acceptance');
+  definition.acceptance.forEach(criterion => {
+    const li = document.createElement('li'); const label = document.createElement('label');
+    const check = document.createElement('input'); check.type = 'checkbox'; check.dataset.criterion = criterion.id;
+    check.disabled = !reviewable;
+    label.append(check, document.createTextNode(` ${criterion.id} · ${criterion.description} · ${criterion.method}${criterion.required !== false ? ' · 必需' : ' · 可选'}`));
+    li.append(label); criteria.append(li);
+  });
+  $('durable-package-toml').value = definition.files['task.toml'] || '';
+  $('durable-package-instruction').value = definition.files['instruction.md'] || '';
+  for (const name of ['toml', 'instruction', 'save', 'cancel']) $('durable-package-' + name).disabled = !editable;
+  $('durable-package-reuse').disabled = legacy;
+  $('durable-package-review').disabled = !reviewable;
+  const link = $('durable-package-export'); link.hidden = legacy;
+  if (!legacy) link.href = `/api/durable/tasks/${task.id}/package.zip?revision=${encodeURIComponent(definition.revision)}`;
+}
+function packageRequest(action, payload) {
+  const identity = JSON.stringify({task: durableSelected.id, revision: durablePackage.revision, payload});
+  const previous = durablePackageRequests.get(action);
+  if (previous?.identity === identity) return {...payload, request_id: previous.requestId};
+  const requestId = crypto.randomUUID();
+  durablePackageRequests.set(action, {identity, requestId});
+  return {...payload, request_id: requestId};
+}
+$('durable-library-search').addEventListener('input', () => renderDurableHistory(durableLibrary));
+$('durable-package-files').addEventListener('change', async event => {
+  const sequence = ++durableImportSequence;
+  durableImportFiles = null; durableCreateRequest = null;
+  const chosen = Array.from(event.target.files || []);
+  if (!chosen.length) return show('durable-package-import-state', '未选择任务包，将按目标初始化草稿。');
+  $('durable-create').disabled = true;
+  try {
+    if (chosen.length > 64 || chosen.reduce((sum, file) => sum + file.size, 0) > 48 * 1024) throw new Error('文本任务包最多 64 个文件、合计 48 KiB。');
+    const files = Object.create(null);
+    for (const file of chosen) {
+      const relative = file.webkitRelativePath || file.name;
+      const name = relative.includes('/') ? relative.slice(relative.indexOf('/') + 1) : relative;
+      const parts = name.split('/');
+      if (parts.some(part => !part || part.startsWith('.') || part === '..') || /[\\:]/.test(name) ||
+          !(['task.toml', 'instruction.md'].includes(name) || /^(tests|inputs|environment)\//.test(name)) ||
+          /(^|\/)(auth\.json|checkpoint\.tar\.gz|credentials\.json)$/.test(name) || /\.(key|pem)$/.test(name)) throw new Error(`不支持的任务包文件：${name}`);
+      if (Object.hasOwn(files, name)) throw new Error(`重复任务包文件：${name}`);
+      files[name] = new TextDecoder('utf-8', {fatal: true}).decode(await file.arrayBuffer());
+    }
+    if (!files['task.toml'] || !files['instruction.md']) throw new Error('目录必须包含 task.toml 和 instruction.md。');
+    if (!authenticated || sequence !== durableImportSequence) return;
+    durableImportFiles = files; $('durable-goal').value = files['instruction.md'];
+    show('durable-package-import-state', `已读取 ${chosen.length} 个文本文件；将按导入规范创建，不会上传凭据或原生会话。`);
+  } catch (error) { if (authenticated && sequence === durableImportSequence) show('durable-package-import-state', error.message, true); }
+  finally { if (sequence === durableImportSequence) $('durable-create').disabled = !authenticated || !$('durable-image').value; }
+});
+for (const name of ['toml', 'instruction']) $('durable-package-' + name).addEventListener('input', () => { durablePackageDirty = true; });
+$('durable-package-cancel').addEventListener('click', () => {
+  durablePackageDirty = false;
+  if (durableSelected) loadDurable(durableSelected.id);
+});
+$('durable-package-save').addEventListener('click', async () => {
+  if (!durableSelected || !durablePackage || durablePackage.legacy) return;
+  const id = durableSelected.id; const sequence = durableSelectionSequence;
+  const definition = {...durablePackage.files, 'task.toml': $('durable-package-toml').value,
+    'instruction.md': $('durable-package-instruction').value};
+  const body = packageRequest('save', {expected_revision: durablePackage.revision, definition});
+  if (new TextEncoder().encode(JSON.stringify(body)).length > 65536) return show('durable-package-state', '规范超过 Web 64 KiB 请求限制，请使用 CLI。', true);
+  $('durable-package-save').disabled = true;
+  try {
+    await request(`/api/durable/tasks/${id}/package`, 'PUT', body);
+    if (durablePackageRequests.get('save')?.requestId === body.request_id) durablePackageRequests.delete('save');
+    if (authenticated && sequence === durableSelectionSequence) {
+      durablePackageDirty = false; await loadDurable(id);
+    }
+  } catch (error) {
+    if (authenticated && sequence === durableSelectionSequence) {
+      show('durable-package-state', `${error.message}；草稿已保留，重试使用同一请求 ID。`, true);
+      $('durable-package-save').disabled = false;
+    }
+  }
+});
+$('durable-package-reuse').addEventListener('click', async () => {
+  if (!durableSelected || !durablePackage || durablePackage.legacy) return;
+  const id = durableSelected.id; const sequence = durableSelectionSequence;
+  const body = packageRequest('reuse', {});
+  $('durable-package-reuse').disabled = true;
+  try {
+    const created = await request(`/api/durable/tasks/${id}/reuse`, 'POST', body);
+    if (durablePackageRequests.get('reuse')?.requestId === body.request_id) durablePackageRequests.delete('reuse');
+    if (!authenticated || sequence !== durableSelectionSequence) return;
+    const history = await request('/api/durable/tasks');
+    if (!authenticated || sequence !== durableSelectionSequence) return;
+    renderDurableHistory(history.tasks); await loadDurable(created.id);
+  } catch (error) {
+    if (authenticated && sequence === durableSelectionSequence) {
+      show('durable-package-state', `${error.message}；结果未确认时不要换请求 ID 重复创建。`, true);
+      $('durable-package-reuse').disabled = false;
+    }
+  }
+});
+$('durable-package-review').addEventListener('click', async () => {
+  if (!durableSelected || !durablePackage || !durableLatestRun) return;
+  const id = durableSelected.id; const sequence = durableSelectionSequence;
+  const notes = $('durable-package-review-notes').value.trim();
+  if (!notes) return show('durable-package-state', '请填写验收依据与意见。', true);
+  const criteria = {};
+  $('durable-package-acceptance').querySelectorAll('input[data-criterion]').forEach(input => { criteria[input.dataset.criterion] = input.checked; });
+  const body = packageRequest('review', {expected_revision: durablePackage.revision, run_id: durableLatestRun.id,
+    decision: $('durable-package-decision').value, notes, criteria});
+  $('durable-package-review').disabled = true;
+  try {
+    await request(`/api/durable/tasks/${id}/review`, 'POST', body);
+    if (durablePackageRequests.get('review')?.requestId === body.request_id) durablePackageRequests.delete('review');
+    if (authenticated && sequence === durableSelectionSequence) await loadDurable(id);
+  } catch (error) {
+    if (authenticated && sequence === durableSelectionSequence) {
+      show('durable-package-state', error.message, true); $('durable-package-review').disabled = false;
+    }
+  }
 });
 
 async function initializeTemplates() {
@@ -679,6 +974,7 @@ let packageGeneration = 0;
 let packageLoadSequence = 0;
 const packagePendingKey = 'chattask-package-pending';
 function clearPackageState() {
+  clearPythonTaskUnit();
   packageGeneration++; packageLoadSequence++;
   if (packagePoll) clearTimeout(packagePoll);
   packagePoll = null; packageDraft = null; packageSchema = null; packageBusy = false;
@@ -772,6 +1068,7 @@ function renderPackage(draft) {
   if (!authenticated) return;
   if (!draft.preview || packageDraft?.preview?.preview_sha256 !== draft.preview.preview_sha256) $('package-confirm-text').checked = false;
   packageDraft = draft;
+  renderPythonTaskUnit(draft);
   $('package-history').value = draft.id;
   history.replaceState(null, '', '#package=' + draft.id);
   $('package-link').textContent = '草稿链接：' + location.href + ' · 修订 ' + draft.revision + ' · ' + draft.fingerprint;
@@ -833,6 +1130,7 @@ function renderPackage(draft) {
 async function loadPackage(id) {
   if (!id) {
     packageLoadSequence++; packageDraft = null;
+    clearPythonTaskUnit();
     if (packagePoll) clearTimeout(packagePoll);
     history.replaceState(null, '', location.pathname); $('package-link').textContent = '';
     fillPackage({...packageSchema.defaults,mode:'new'}); $('package-preview').textContent = '请先保存草稿并运行预检。';
@@ -884,7 +1182,8 @@ async function initializePackages() {
     catch (_) { packagePendingSet(null); }
     const match = /^#package=([a-f0-9]{32})$/.exec(location.hash);
     if (match) { await loadPackage(match[1]); $('package-tab').click(); }
-    else fillPackage({...packageSchema.defaults,mode:'new'});
+    else fillPackage({...packageSchema.defaults,mode:pendingPythonTemplate ? 'existing' : 'new'});
+    pendingPythonTemplate = false;
     if (!packageDraft?.publish_task_id && !packageDraft?.prepare_error) show('package-state', packagePending ? '上次操作结果未确认；重复相同按钮将使用原请求 ID。' : !packageSchema.available ? '发包网关尚未配置；可填写草稿，预检与发布暂不可用。' : packageDraft ? '已读取草稿与预检状态。' : '填写参数后保存草稿。', !packageSchema.available);
     packageControls();
   } catch (error) { show('package-state', error.message, true); }
@@ -912,7 +1211,8 @@ $('package-save').addEventListener('click', async () => {
       editing ? '/api/package/drafts/' + packageDraft.id : '/api/package/drafts',
       editing ? 'PUT' : 'POST', body);
     await packageHistory(); fillPackage(draft.spec); renderPackage(draft);
-    show('package-state', '草稿已保存；参数变更会使先前预检和确认失效。');
+    show('package-state', '发版 Task 草稿已保存；参数和资源声明已形成任务包。修改会使先前预检和确认失效。');
+    const library = await request('/api/task-library'); renderDurableHistory(library.tasks);
   } catch (error) { show('package-state', '保存结果未确认：' + error.message + '。重试会使用同一请求 ID。', true); }
   finally { packageBusy = false; packageControls(); }
 });

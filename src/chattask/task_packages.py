@@ -9,10 +9,11 @@ import hashlib
 import io
 import json
 import math
+import os
 import re
 import stat
 import zipfile
-from pathlib import PurePosixPath
+from pathlib import Path
 
 try:
     import tomllib
@@ -127,10 +128,32 @@ def validate_files(files):
     except (AttributeError, TypeError) as exc:
         raise ValueError('invalid task metadata') from exc
     digest = hashlib.sha256(json.dumps(normalized, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-    return {'revision': digest, 'files': normalized, 'purpose': purpose,
+    result = {'revision': digest, 'files': normalized, 'purpose': purpose,
             'deliverables': deliverables, 'acceptance': criteria,
             'harbor_schema': '1.4', 'legacy': False,
             'harbor_runnable': 'tests/test.sh' in normalized}
+    if 'template_id' in app:
+        ident = app['template_id']
+        revision = app.get('template_revision')
+        if not isinstance(ident, str) or not _ID.fullmatch(ident) or type(revision) is not int or revision < 1:
+            raise ValueError('invalid literal task template reference')
+        result['template'] = {'id': ident, 'revision': revision, 'provenance': 'declared-in-definition'}
+    for key, field, expected in [('parameters', 'parameters_file', dict), ('resources', 'resources_file', list)]:
+        if field in app:
+            name = safe_file(app[field])
+            if not name.startswith('inputs/') or name not in normalized:
+                raise ValueError('task template data reference is unavailable')
+            try:
+                data = json.loads(normalized[name])
+            except ValueError as exc:
+                raise ValueError('invalid template input JSON') from exc
+            if not isinstance(data, expected):
+                raise ValueError('invalid task template data type')
+            result[key] = data
+    result['skill_digests'] = {name: hashlib.sha256(text.encode()).hexdigest()
+                               for name,text in sorted(normalized.items())
+                               if name.startswith('environment/skills/') and name.endswith('/SKILL.md')}
+    return result
 
 
 def initial_package(instructions, image, definition=None):
@@ -207,6 +230,63 @@ def validate_reward(reward):
     return reward
 
 
+def read_definition_directory(directory):
+    """Read one explicitly selected, bounded authoring directory; never follow links."""
+    root = Path(directory)
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError('definition root must be a real directory')
+    files, pending, visited, total = {}, [root], 0, 0
+    while pending:
+        current = pending.pop()
+        with os.scandir(current) as entries:
+            for entry in entries:
+                visited += 1
+                if visited > 512 or entry.is_symlink():
+                    raise ValueError('definition traversal budget or symlink violation')
+                path = Path(entry.path)
+                relative = path.relative_to(root).as_posix()
+                if entry.is_dir(follow_symlinks=False):
+                    if relative.split('/')[0] not in ('tests', 'inputs', 'environment') or any(p.startswith('.') for p in relative.split('/')):
+                        raise ValueError('unsupported definition directory')
+                    pending.append(path)
+                elif entry.is_file(follow_symlinks=False):
+                    safe_file(relative)
+                    total += entry.stat(follow_symlinks=False).st_size
+                    if len(files) >= MAX_FILES or total > MAX_BYTES:
+                        raise ValueError('definition file budget exceeded')
+                    with path.open('rb') as source:
+                        data = source.read(MAX_BYTES + 1)
+                    if len(data) > MAX_BYTES:
+                        raise ValueError('definition file budget exceeded')
+                    try:
+                        files[relative] = data.decode('utf-8')
+                    except UnicodeError as exc:
+                        raise ValueError('definition files must be UTF-8 text') from exc
+                else:
+                    raise ValueError('special files forbidden in task definitions')
+    validate_files(files)
+    return files
+
+
+def initialize_definition_directory(directory, instructions, image):
+    """Create a new authoring directory; unknown existing content is never replaced."""
+    package = initial_package(instructions, image)
+    root = Path(directory)
+    if root.is_symlink() or root.exists():
+        raise ValueError('definition destination already exists; choose a new directory')
+    root.mkdir(mode=0o700, parents=True, exist_ok=False)
+    # Publish task.toml last so a partial write is not a complete task package.
+    ordered = sorted(package['files'], key=lambda name: (name == 'task.toml', name))
+    for name in ordered:
+        target = root / safe_file(name)
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'wb') as output:
+            output.write(package['files'][name].encode())
+    return {'directory': str(root), 'revision': package['revision'],
+            'files': sorted(package['files']), 'preparation': 'pending', 'official_schema_checked': False}
+
+
 def run_archive(store, run):
     """Archive actual terminal evidence; native checkpoints are deliberately excluded."""
     definition = read_definition_zip(store.artifact(run['id'], 'task-definition.zip'))
@@ -216,12 +296,13 @@ def run_archive(store, run):
         for name, text in sorted(definition['files'].items()):
             archive.writestr('definition/' + safe_file(name), text)
         public = {k: run[k] for k in ('id', 'task_id', 'number', 'instructions', 'status',
-                  'created_at', 'updated_at', 'error', 'package_revision', 'evaluation', 'review') if k in run}
+                  'created_at', 'updated_at', 'error', 'package_revision', 'evaluation', 'review',
+                  'source_records', 'workflow', 'preparation_receipt') if k in run}
         archive.writestr('run.json', json.dumps(public, ensure_ascii=False, sort_keys=True))
         for entry in run.get('artifacts', []):
             name = entry['name']
             # Raw native logs and restored session state stay private to the runtime.
-            if name in ('checkpoint.tar.gz', 'task-data.zip', 'codex.events.jsonl', 'task-definition.zip'):
+            if name in ('checkpoint.tar.gz', 'task-data.zip', 'task-definition.zip') or name.endswith('.events.jsonl'):
                 continue
             store._artifact_name(name)
             body = store.artifact(run['id'], name)

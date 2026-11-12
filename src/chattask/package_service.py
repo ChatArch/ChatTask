@@ -47,6 +47,108 @@ class PackageService:
     def _public(self,draft):
         return {key:value for key,value in draft.items() if key not in ('owner','operations')}
 
+    def _snapshot_task_definition(self,draft):
+        from .task_templates import python_task_package
+        from .task_packages import definition_zip,revision_artifact,summary
+        package=python_task_package(draft['spec'],image_profile=draft.get('prepare_image_profile'))
+        self.store.put_artifact(draft['id'],revision_artifact(package['revision']),definition_zip(package))
+        draft['task_package']=summary(package)
+        draft.setdefault('task_package_history',{})[package['revision']]=summary(package)
+        draft.setdefault('task_stages',[])
+        return package
+
+    def task_definition(self,owner,ident,revision=None):
+        from .task_packages import read_definition_zip,revision_artifact
+        draft=self._owned(owner,ident)
+        if not draft.get('task_package'):
+            return {'legacy':True,'revision':None,'purpose':'Existing Python publication draft',
+                    'files':{},'acceptance':[],'parameters':draft['spec'],'resources':[]}
+        revision=revision or draft['task_package']['revision']
+        metadata=draft.get('task_package_history',{}).get(revision)
+        if metadata is None:raise KeyError('task definition revision not found')
+        package=read_definition_zip(self.store.artifact(ident,revision_artifact(revision)))
+        if package['revision']!=revision:raise ValueError('Python Task definition digest mismatch')
+        return {**package,**metadata}
+
+    def export_task(self,owner,ident,revision=None):
+        from .task_packages import definition_zip
+        package=self.task_definition(owner,ident,revision)
+        if package['legacy']:raise ValueError('legacy draft has no frozen task package')
+        return definition_zip(package)
+
+    def export_task_data(self,owner,ident):
+        """Export definitions and observed stage receipts, never execution credentials.
+
+        Artifact manifests preserve references to other outputs without copying an
+        arbitrary workspace or native checkpoint into a reusable task definition.
+        """
+        import io
+        import zipfile
+        draft=self.get(owner,ident)
+        definition=self.task_definition(owner,ident)
+        if definition['legacy']:raise ValueError('legacy draft has no frozen task package')
+        data=io.BytesIO()
+        total=0
+        with zipfile.ZipFile(data,'w',zipfile.ZIP_DEFLATED) as archive:
+            def add(name,raw):
+                nonlocal total
+                total+=len(raw)
+                if total>16*1024*1024:raise ValueError('Python task evidence export exceeds 16 MiB')
+                archive.writestr(name,raw)
+            def record(name,value):
+                add(name,json.dumps(value,sort_keys=True,ensure_ascii=False,indent=2).encode())
+            for name,text in definition['files'].items():add(name,text.encode())
+            record('task.json',{'id':ident,'kind':'python-package','created_at':draft['created_at'],
+                'updated_at':draft['updated_at'],'revision':draft['revision'],'spec':draft['spec'],
+                'definition_revision':definition['revision'],'task_stages':draft.get('task_stages',[]),
+                'review':{'decision':'not_recorded','note':'Publication verification is not human business acceptance.'},
+                'scope':'private evidence export; references are not credentials or publication grants'})
+            for revision in sorted(draft.get('task_package_history',{})):
+                add('definitions/'+revision+'.zip',self.export_task(owner,ident,revision))
+            for stage in draft.get('task_stages',[]):
+                task_id=stage.get('native_task_id')
+                if not task_id:
+                    record('stages/'+stage['id']+'/state.json',{'stage':stage,'status':'dispatch_outcome_unknown'})
+                    continue
+                task=self.tasks.get(owner,task_id)
+                record('stages/'+stage['id']+'/state.json',{'stage':stage,'status':task['status'],
+                    'artifacts':task.get('artifacts',[]),
+                    'image_profile':task.get('image_profile'),'created_at':task.get('created_at'),
+                    'started_at':task.get('started_at'),'finished_at':task.get('finished_at')})
+                for entry in task.get('artifacts',[]):
+                    name=entry.get('name')
+                    if name not in ('trusted-validation.json','trusted-publication.json'):continue
+                    raw=self.store.artifact(task_id,name)
+                    if len(raw)!=entry['size'] or hashlib.sha256(raw).hexdigest()!=entry['sha256']:
+                        raise ValueError('Python task evidence digest mismatch')
+                    if len(raw)>50000:raise ValueError('Python task receipt exceeds limit')
+                    add('stages/'+stage['id']+'/'+name,raw)
+        return data.getvalue()
+
+    def _stage_intent(self,draft,kind,native_request_id,image_profile):
+        if not draft.get('task_package'):
+            self._snapshot_task_definition(draft)
+        stages=draft.setdefault('task_stages',[])
+        for stage in stages:
+            if stage['native_request_id']==native_request_id:
+                if stage['kind']!=kind:raise ValueError('publication stage identity conflict')
+                return stage
+        stage={'id':uuid.uuid4().hex,'kind':kind,'native_request_id':native_request_id,
+               'native_task_id':None,'draft_revision':draft['revision'],
+               'definition_revision':draft['task_package']['revision'],
+               'spec_fingerprint':draft['fingerprint'],'image_profile':image_profile,'created_at':now()}
+        stages.append(stage)
+        return stage
+
+    @staticmethod
+    def _link_stage(draft,native_request_id,native_task_id):
+        for stage in draft.get('task_stages',[]):
+            if stage['native_request_id']==native_request_id:
+                if stage.get('native_task_id') not in (None,native_task_id):
+                    raise ValueError('publication stage result identity conflict')
+                stage['native_task_id']=native_task_id
+                return
+
     def list(self,owner):
         return [self._public(d) for d in sorted(self.store.list('package_drafts'),key=lambda x:x['created_at'],reverse=True)
                 if d.get('owner')==owner][:100]
@@ -138,6 +240,7 @@ class PackageService:
                    'create_request_id':body['request_id'],'create_fingerprint':digest,
                    'operations':{body['request_id']:{'kind':'create','fingerprint':digest}},
                    'prepare_task_id':None,'prepare_image_profile':None,'prepared_revision':None,'preview':None,'publish_task_id':None}
+            self._snapshot_task_definition(draft)
             self.store.put('package_drafts',ident,draft)
             return self._public(draft)
 
@@ -162,6 +265,7 @@ class PackageService:
             draft.update(spec=spec,fingerprint=fingerprint(spec),revision=draft['revision']+1,
                          prepare_task_id=None,prepare_request_id=None,prepare_image_profile=None,prepared_revision=None,preview=None,updated_at=now())
             draft['operations'][body['request_id']]={'kind':'update','fingerprint':digest}
+            self._snapshot_task_definition(draft)
             self.store.put('package_drafts',ident,draft)
             return self._public(draft)
 
@@ -195,6 +299,8 @@ class PackageService:
             draft['prepare_image_profile']=body['image_profile']
             draft['prepared_revision']=draft['revision']
             draft['operations'][body['request_id']]={'kind':'prepare','fingerprint':digest}
+            self._snapshot_task_definition(draft)
+            self._stage_intent(draft,'prepare',task_request,body['image_profile'])
             self.store.put('package_drafts',ident,draft)
         task=await self.tasks.create_internal(owner,{'request_id':task_request,'instructions':prepare_instructions(draft['spec']),
             'image_profile':body['image_profile']},{'mode':'prepare','plan':policy(draft['spec'])})
@@ -202,6 +308,7 @@ class PackageService:
             fresh=self._owned(owner,ident)
             if fresh['revision']==draft['revision'] and fresh.get('prepare_request_id')==body['request_id']:
                 fresh['prepare_task_id']=task['id'];fresh['updated_at']=now()
+                self._link_stage(fresh,task_request,task['id'])
                 self.store.put('package_drafts',ident,fresh)
         return self.get(owner,ident)
 
@@ -246,6 +353,7 @@ class PackageService:
             fresh['operations'][body['request_id']]={'kind':'confirm','fingerprint':digest}
             fresh['approval']={'owner':owner,'at':now(),'revision':draft['revision'],
                 'preview_sha256':preview['preview_sha256'],'confirmation':preview['confirmation']}
+            self._stage_intent(fresh,'publish',_task_request('pkgpub',owner,ident,draft['revision'],body['request_id']),prep['image_profile'])
             self.store.put('package_drafts',ident,fresh)
         task=await self.tasks.create_internal(owner,{'request_id':_task_request('pkgpub',owner,ident,draft['revision'],body['request_id']),
             'instructions':publish_instructions(draft['spec'],preview['plan_sha256']),
@@ -255,6 +363,7 @@ class PackageService:
             fresh=self._owned(owner,ident)
             if fresh.get('confirm_request_id')==body['request_id']:
                 fresh['publish_task_id']=task['id'];fresh['updated_at']=now()
+                self._link_stage(fresh,_task_request('pkgpub',owner,ident,draft['revision'],body['request_id']),task['id'])
                 self.store.put('package_drafts',ident,fresh)
         return self.get(owner,ident)
 
@@ -323,6 +432,7 @@ class PackageService:
             fresh['verification_task_id']=previous if old else None
             fresh['operations'][body['request_id']]={'kind':'recheck','fingerprint':digest}
             fresh['updated_at']=now()
+            self._stage_intent(fresh,'verify',_task_request('pkgverify',owner,ident,draft['revision'],body['request_id']),prep['image_profile'])
             self.store.put('package_drafts',ident,fresh)
         gateway=getattr(getattr(self.tasks,'executor',None),'gateway',None)
         if not gateway or not callable(getattr(gateway,'close',None)):
@@ -339,5 +449,6 @@ class PackageService:
             fresh=self._owned(owner,ident)
             if fresh.get('verification_request_id')==body['request_id'] and fresh['revision']==draft['revision']:
                 fresh['verification_task_id']=task['id'];fresh['updated_at']=now()
+                self._link_stage(fresh,_task_request('pkgverify',owner,ident,draft['revision'],body['request_id']),task['id'])
                 self.store.put('package_drafts',ident,fresh)
         return self.get(owner,ident)

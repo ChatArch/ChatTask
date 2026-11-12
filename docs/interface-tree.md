@@ -25,6 +25,12 @@ chattask
 ├── release.ChatGHReleaseAdapter   # 已合并 PR、检查、标签写入/核对
 ├── workspace_analysis.WorkspaceAnalysis  # 材料草稿/确认/Run/摘要报告，独立只读执行器
 ├── durable.DurableTaskService  # create/list/get/runs/resume/pause/complete/grant/artifact/worker_once
+│   └── package/revise_package/export_package/reuse_package/evaluate_package/evaluations/review_package
+├── task_packages  # validate_files/read_definition_directory/definition_zip/run_archive
+├── task_templates.TaskTemplateService  # catalog/instantiate/library；参数和资源引用，不发放权限
+├── package_service.PackageService  # 既有发布流程加 task_definition/export_task/export_task_data
+├── task_verification.SandboxPackageVerifier  # 新 Sandbox 独立验证与资源回收核对
+├── task_trajectories.codex_to_atif  # 仅转换实际可观察原生事件
 ├── durable.executor_lock / run_worker  # 单写者进程锁与独立队列执行
 ├── durable_archive.validate_checkpoint  # 私有归档结构、预算及已知凭据扫描
 ├── durable_research.source_records / research_files  # 有界来源和本轮研究产物适配

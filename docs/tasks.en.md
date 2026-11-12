@@ -1,5 +1,58 @@
 # Generic tasks and images
 
+## Task package lifecycle (unreleased candidate)
+
+A Task owns its definition from creation, not just a ZIP assembled afterward. `task.toml` uses the Harbor 1.4 structure with purpose, deliverables, acceptance and template/resource declarations under the `metadata.chatarch` extension. This adapter supports a bounded subset, not every Harbor environment or Agent plugin, and does not automatically install Harbor/Rewardkit.
+
+```text
+task.toml                         # Structured purpose, deliverables and criteria
+instruction.md                    # Complete instructions for the solver
+inputs/                           # Parameters, sources and resource references, no credentials
+environment/skills/<name>/SKILL.md # Optional task-scoped method, not a global grant
+tests/test.sh                     # Independent verifier entrypoint in a new Sandbox
+tests/checks.py                    # Programmatic checks when required
+tests/quality.toml                 # Optional model rubric
+tests/judge-guide.md               # Optional judge guidance
+```
+
+Natural-language Tasks start with a pending definition. The Agent prepares checks/rubrics; the server freezes the definition before solving. Imported complete definitions skip preparation. Execution, independent verification and human acceptance are distinct: missing criteria, verifier errors, unavailable reviews and unknown cleanup never pass. Required failures cannot be averaged away. CAS revisions create new definitions without rewriting old Run snapshots.
+
+Private round exports preserve the frozen definition, observed native events/ATIF, deliverables, reward/details and explicit review. Native checkpoints remain private to continuation and are excluded from reusable exports. Reuse creates a new Task without another instance's account, checkpoint, score or grants. Failed rounds remain evidence; the library is not a public dataset. ATIF is an exchange format, not a native session checkpoint.
+
+The default Task view provides bounded text-file import, definition editing/cancel/revision, library search, reuse, downloads and explicit human review. Importable APIs live in `DurableTaskService`, `TaskTemplateService` and `PackageService`; consult the actual `chattask --tree` for commands:
+
+```bash
+chattask task package init ./example-task 'Build a tested utility' --image '<operator-image>'
+chattask task package validate ./example-task
+chattask task create --definition-dir ./example-task --image-profile python-package \
+  --request-id example-create --owner operator --env-profile site
+```
+
+`validate --official` additionally requires the pinned Harbor 0.25.0 schema already installed. Default validation honestly reports `official_schema_checked=false` and executes no task. Imports allow at most 64 UTF-8 files/256 KiB and no symlink traversal. HTTP body limits are enforced separately.
+
+| Route | Contract |
+|---|---|
+| `GET /api/task-templates` | Fixed templates, explicit revisions and parameter contracts |
+| `POST /api/task-templates/{id}/instantiate` | `request_id`, `template_revision`, `parameters`; general templates also select registered `image_profile` |
+| `GET /api/task-resources` | Configuration presence, not reachability or secret values |
+| `GET /api/task-library` | Visible general/Python release Tasks, at most 100 items |
+| `GET/PUT /api/durable/tasks/{id}/package` | Read definition or save `files` with stable `request_id` and `expected_revision` |
+| `GET /api/durable/tasks/{id}/package.zip` | Definition ZIP with optional `revision` |
+| `POST /api/durable/tasks/{id}/reuse` | New private Task without inherited success |
+| `POST /api/durable/tasks/{id}/runs/{run}/evaluate` | Durable evaluation queue; HTTP never executes submitted scripts |
+| `GET /api/durable/tasks/{id}/runs/{run}/evaluations` | That exact round's evaluation history |
+| `POST /api/durable/tasks/{id}/review` | Explicit `request_id`, `run_id`, `expected_revision`, `decision`, criterion evidence and `notes` |
+
+The independent verifier starts a new Sandbox from the frozen definition and exact round outputs. Operators must provision required Python/Rewardkit/supported Codex judge dependencies. Missing dependencies or unavailable upstreams are verification errors, not evidence that content passed or failed. A configured model/image/gateway reference does not prove live availability.
+
+### Python publication is a Task
+
+Saving `python-package@1` parameters creates a package without dispatching publication. Model, environment, exact repository, OIDC Publisher and package-index resources remain references; server-side services issue existing constrained capabilities per stage. Established projects reuse their unchanged publishing chain instead of reopening PyPI login/Publisher setup.
+
+The original PackageService still owns read-only preparation → exact target/plan confirmation → scoped publication → independent readback. Each stage binds a native task ID, draft revision and definition digest. Parameter changes invalidate old previews without overwriting old definitions. Under `/api/package/drafts/{id}/`, `task-package` and `task-package.zip` read/export definitions; `task-data.zip` includes versioned definitions, observed stage state, trusted validation/publication receipts and digest references to other artifacts. It does not automatically copy arbitrary workspaces or native sessions. Machine publication verification is not human business acceptance.
+
+This adds no second publishing engine. Selecting a template or providing resources grants no push, PR, merge, tag, upload or production-restart permission. Candidate functionality and published/live versions require separate acceptance.
+
 ## Long-term Task candidate
 
 Long-term Tasks are separate from one-shot `chattask run`. `POST /api/durable/tasks` accepts `request_id`, `instructions` and `image_profile`; the authenticated principal becomes owner. `GET /api/durable/tasks`, `/{id}` and `/{id}/runs` return private history. `POST /{id}/resume` accepts a new `request_id`, `instructions` and optional `acknowledge_unknown=true`; `POST /{id}/pause` and `/{id}/complete` accept `request_id`. Owner-only `POST /{id}/members` grants a named principal `viewer` or `editor`. `GET /{id}/runs/{run_id}/artifacts/{name}` checks access and SHA256. These paths all start with `/api/durable/tasks`, and writes use the existing site CSRF protection. Equal repeated request IDs return the same result; changed input conflicts. An active round cannot be resumed again.

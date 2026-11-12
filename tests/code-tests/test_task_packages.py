@@ -150,3 +150,154 @@ def test_unavailable_verifier_never_generates_a_passing_reward(tmp_path):
     assert evaluation.get('reward') is None
     again=asyncio.run(method('owner',task['id'],run['id'],{'request_id':'check'}))
     assert again['id']==evaluation['id']
+
+
+def test_preparation_is_frozen_before_the_execution_callback_continues(tmp_path):
+    class Preparer(SyntheticNativeExecutor):
+        async def execute_durable(self,task,run,checkpoint,save_checkpoint,progress):
+            prepare=task.get('_prepare_definition')
+            assert callable(prepare),'Agent preparation callback is not wired'
+            prepared=await prepare(definition(task['goal']))
+            persisted=svc.store.get('durable_runs',run['id'])
+            assert persisted['package_revision']==prepared['revision']
+            assert svc.package('owner',task['id'])['preparation']=='agent_generated'
+            return await super().execute_durable(task,run,checkpoint,save_checkpoint,progress)
+    svc=DurableTaskService(TaskStore(tmp_path/'state'),Preparer())
+    task=create(svc)
+    result=asyncio.run(svc.worker_once())
+    assert result['status']=='completed',result.get('error')
+    assert result['package_snapshot']['preparation']=='agent_generated'
+
+
+def test_native_executor_receives_private_preparation_callback_and_definition():
+    from chattask.codex_tasks import CodexTaskExecutor,CodexRuntime
+    executor=CodexTaskExecutor(None,CodexRuntime('https://model.example/v1','synthetic-key',{'python':'trusted-image'}))
+    captured={}
+    async def execute(invocation,progress,cancelled):captured.update(invocation);return {'ok':False}
+    executor.execute=execute
+    async def prepare(files):return files
+    async def checkpoint(*args):pass
+    async def progress(*args):pass
+    task={'id':'a'*32,'goal':'Task','image_profile':'python','_prepare_definition':prepare,
+          '_definition_files':definition()}
+    run={'id':'b'*32,'instructions':'Task','number':1,'session_id':None}
+    asyncio.run(executor.execute_durable(task,run,None,checkpoint,progress))
+    assert captured['_durable'].get('prepare_definition') is prepare
+    assert captured['_durable'].get('definition_files')==definition()
+
+
+def test_preparation_success_does_not_make_a_timed_out_solver_quiescent(monkeypatch):
+    """Synthetic SDK timeout: never capture a workspace while the solver may still write."""
+    from types import SimpleNamespace as N
+    from chattask.codex_tasks import CodexTaskExecutor,CodexRuntime
+    from chattask.settings import TaskSettings
+    from chattask.task_packages import initial_package
+    captures=[]
+    class Commands:
+        async def run(self,command,opts):
+            if '> /workspace/agent-events.jsonl' in command:raise TimeoutError('synthetic in-flight solver')
+            if 'capture_checkpoint.py' in command:captures.append(command)
+            return N()
+    class Files:
+        async def write_file(self,*args,**kwargs):pass
+        async def read_file(self,path):
+            if path.endswith('preparation-events.jsonl'):
+                return '\n'.join(json.dumps(e) for e in [{'type':'thread.started','thread_id':'prep-session'},{'type':'turn.completed'}])
+            if path.endswith('prepared-definition.json'):return json.dumps({'files':definition()})
+            if path.endswith('agent-events.jsonl'):return json.dumps({'type':'thread.started','thread_id':'live-session'})
+            return ''
+        async def read_bytes(self,*args):return b'not a finished checkpoint'
+    box=N(id='synthetic-box',commands=Commands(),files=Files())
+    class Service:
+        docker=N(containers=N(list=lambda **kwargs:[]))
+        async def create(self,**kwargs):return box,None,{}
+        async def dispose(self,*args):pass
+        def output(self,result):return {'exit_code':0,'stdout':'','stderr':'','error':None}
+    async def exercise():
+        parent=N(lock=asyncio.Lock(),settings=TaskSettings('http://127.0.0.1:12345','synthetic'),docker=Service.docker)
+        executor=CodexTaskExecutor(parent,CodexRuntime('https://model.example/v1','synthetic-key',{'python':'trusted-image'}))
+        async def prepare(files):return initial_package('Goal','trusted-image',files)
+        async def save(*args):raise AssertionError('in-flight solver cannot be checkpointed')
+        async def progress(*args):pass
+        monkeypatch.setattr('chattask.codex_tasks.TaskService',lambda *args,**kwargs:Service())
+        return await executor.execute({'id':'a'*32,'image_profile':'python','instructions':'Goal',
+                                       '_durable':{'checkpoint':None,'session_id':None,'prepare_definition':prepare,
+                                                   'definition_files':definition(),'save_checkpoint':save}},progress,lambda:False)
+    result=asyncio.run(exercise())
+    assert not result['ok']
+    assert captures==[], 'A completed preparation turn must not certify the next solver as stopped'
+
+
+def test_null_preparation_cannot_be_certified_as_agent_generated(tmp_path):
+    class NullPreparer(SyntheticNativeExecutor):
+        async def execute_durable(self,task,run,*args):
+            await task['_prepare_definition'](None)
+            return await super().execute_durable(task,run,*args)
+    svc=DurableTaskService(TaskStore(tmp_path/'state'),NullPreparer());task=create(svc)
+    run=asyncio.run(svc.worker_once())
+    assert run['status']=='blocked'
+    assert svc.package('owner',task['id'])['preparation']=='pending'
+
+
+def test_regrading_does_not_relabel_an_old_trajectory_with_the_current_model(tmp_path):
+    from types import SimpleNamespace
+    class NativeEvents(SyntheticNativeExecutor):
+        runtime=SimpleNamespace(model='requested-a')
+        async def execute_durable(self,*args):
+            result=await super().execute_durable(*args)
+            result['requested_model']='requested-a'
+            events='\n'.join(json.dumps(e) for e in [{'type':'thread.started','thread_id':'session-1'},
+                                                   {'type':'turn.completed'}])
+            result['artifacts'].append({'name':'codex.events.jsonl','data':events.encode()})
+            return result
+    executor=NativeEvents();svc=DurableTaskService(TaskStore(tmp_path/'state'),executor)
+    task=create(svc,definition=definition());run=asyncio.run(svc.worker_once())
+    executor.runtime.model='requested-b'
+    asyncio.run(svc.evaluate_package('owner',task['id'],run['id'],{'request_id':'regrade'}))
+    trajectory=json.loads(svc.store.artifact(run['id'],'trajectory.json'))
+    assert trajectory['agent']['model_name']=='requested-a'
+
+
+def test_manual_review_is_included_in_the_downloadable_round_unit(tmp_path):
+    svc=DurableTaskService(TaskStore(tmp_path/'state'),SyntheticNativeExecutor())
+    task=create(svc,definition=definition());run=asyncio.run(svc.worker_once())
+    review=svc.review_package('owner',task['id'],{'request_id':'review','expected_revision':run['package_revision'],
+                                                'run_id':run['id'],'decision':'accepted','criteria':{'AC1':True},
+                                                'notes':'Reviewed the output against the supplied sources.'})
+    with zipfile.ZipFile(io.BytesIO(svc.store.artifact(run['id'],'task-data.zip'))) as archive:
+        record=json.loads(archive.read('run.json'))
+        assert record.get('review',{}).get('id')==review['id']
+
+
+def test_evaluation_is_queued_for_the_worker_not_run_in_the_request(tmp_path):
+    class Verifier:
+        calls=0
+        async def evaluate(self,*args,**kwargs):
+            self.calls+=1
+            return {'status':'completed','reward':{'reward':1.0},'details':{},
+                    'criteria':{'AC1':{'passed':True}},
+                    'cleanup':{'container_absent':True,'credential_closed':True}}
+    svc=DurableTaskService(TaskStore(tmp_path/'state'),SyntheticNativeExecutor())
+    files=definition();files['task.toml']=files['task.toml'].replace('method = "human"','method = "script"')
+    task=create(svc,definition=files);run=asyncio.run(svc.worker_once())
+    checker=Verifier();svc.package_verifier=checker
+    queued=asyncio.run(svc.evaluate_package('owner',task['id'],run['id'],{'request_id':'check'}))
+    assert queued['status']=='queued','Evaluation must survive Web request/process lifetime'
+    assert checker.calls==0
+    finished=asyncio.run(svc.worker_once())
+    assert finished['status']=='passed' and checker.calls==1
+    assert svc.evaluations('owner',task['id'],run['id'])[-1]['status']=='passed'
+
+
+def test_a_required_failure_cannot_be_averaged_away_by_a_high_total_score(tmp_path):
+    class Verifier:
+        async def evaluate(self,*args,**kwargs):
+            return {'status':'completed','reward':{'reward':100.0},'details':{},
+                    'criteria':{'AC1':{'passed':False}},
+                    'cleanup':{'container_absent':True,'credential_closed':True}}
+    svc=DurableTaskService(TaskStore(tmp_path/'state'),SyntheticNativeExecutor())
+    files=definition();files['task.toml']=files['task.toml'].replace('method = "human"','method = "script"')
+    task=create(svc,definition=files);run=asyncio.run(svc.worker_once());svc.package_verifier=Verifier()
+    asyncio.run(svc.evaluate_package('owner',task['id'],run['id'],{'request_id':'check'}))
+    evaluated=asyncio.run(svc.worker_once())
+    assert evaluated['status']=='failed'

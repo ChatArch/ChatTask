@@ -13,6 +13,12 @@ ChatTask 从 0.1.0 版本起提供可复用的任务模板、受信 Git 源码�
 
 ChatTask 的主模型是 **任务 → Codex + Sandbox → 结果**。任务说明和所选镜像决定工作内容；发包只是示例，不是执行器的固定步骤。当前源码提供 `chattask run` 和受站点登录保护的 `/api/agent/tasks`，结果保存原生事件、产物摘要和 Sandbox 回收证据。镜像预装 infra，运行时 env 只注入服务端选择的模型/工具凭据；优先使用短期受限网关，不把原始 GitHub/PyPI 凭据交给 guest。参见[通用任务、Python 发包模板与网关边界](docs/tasks.md)。源码能力不等于 PyPI 或线上已更新。
 
+### 规范化任务包（未发布候选）
+
+默认「任务」页从创建时就保存 `task.toml`、`instruction.md`、输入、Skill 与验证入口；支持导入、按版本修订、复用为新 Task、逐轮证据下载与显式人工验收。规范版本、运行完成、独立验证和人工接受是不同记录。任务库同时列出普通 Task 与 Python 发版 Task；旧记录不倒填规范、轨迹或评分。
+
+任务模板固定方法与验收逻辑，实例只改变参数。候选内置来源受限的报告模板和 Python 发版适配；发版 Task 复用原有只读预检 → 精确确认 → 受限发布 → CI/OIDC/PyPI/干净安装回读链。任务包提供模型、运行环境、仓库和 Publisher 的资源引用，不包含凭据或继承发布授权。详见[任务包生命周期与资源边界](docs/tasks.md#任务包生命周期未发布候选)。
+
 ### 长期任务候选
 
 “长期任务”视图和 `chattask task` 命令保存稳定 Task 与逐轮 Run；独立 `chattask worker --env-profile site --operator operator` 处理队列。每轮保存受限的工作区与原生 Codex 会话检查点，后续轮次在新 Sandbox 原生接续。暂停是排队前或本轮结束时的协作式操作。生产部署须单独核验真实镜像、网关、原服务和浏览器；详见[长期任务合约](docs/tasks.md#长期任务候选)。

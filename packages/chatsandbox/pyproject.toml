@@ -18,6 +18,11 @@ dev = ["pytest", "build", "twine"]
 [project.scripts]
 chatsandbox = "chatsandbox.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/ChatArch/ChatTask/tree/main/packages/chatsandbox"
+Repository = "https://github.com/ChatArch/ChatTask"
+Documentation = "https://arch.gh.wzhecnu.cn/ChatTask/sandbox-backends/"
+
 [project.entry-points."chatenv.configs"]
 chatsandbox = "chatsandbox.config:ChatSandboxConfig"
 

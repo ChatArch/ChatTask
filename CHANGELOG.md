@@ -1,10 +1,10 @@
 # 更新记录
 
-## Unreleased
+## 0.1.6 — 2026-11-17
 
 - 通用Sandbox连接、生命周期、运行证据和回收改由同仓库独立ChatSandbox包提供；保留Task任务/历史/产物与现有Docker证据字段。`CHATTASK_SANDBOX_PROFILE`引用显式远程后端配置，与旧endpoint/key互斥，错误不回退Docker。
 - 任务镜像派生、durable Run查验与回收改用provider接口；远程后端不读取本机Docker。Research/Overleaf编译保留独立且显式的Docker能力，并在异常时关闭连接。
-- CI从源码先安装公共子包；Task发布前必须已有兼容的ChatSandbox公开wheel。本次源码变更不切换现有服务或发布registry。
+- CI从源码先安装公共子包；Task发布前必须已有兼容的ChatSandbox公开wheel。ChatSandbox 0.1.0 由独立 `chatsandbox-v0.1.0` tag 和 OIDC workflow 首发，再由 `v0.1.6` 发布 Task；服务切换与具体业务验收独立进行，发布源码不覆盖账号、历史或既有服务配置。
 
 ## 0.1.5 — 2026-11-09
 

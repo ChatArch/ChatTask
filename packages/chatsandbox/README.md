@@ -19,7 +19,9 @@ chatsandbox --version
 chatsandbox --tree
 ```
 
-The distribution is independently buildable from `packages/chatsandbox/`. Source installation does not imply a PyPI release. When developing ChatTask, install this package before installing the repository root. Release a compatible ChatSandbox wheel before a ChatTask release that depends on it; the Task publishing workflow checks that dependency first.
+The distribution is independently buildable from `packages/chatsandbox/`. When developing ChatTask, install this package before installing the repository root. Release a compatible ChatSandbox wheel before a ChatTask release that depends on it; the Task publishing workflow checks that dependency first.
+
+Releases use separate tag-only GitHub OIDC workflows in this repository: `chatsandbox-v0.1.0` runs `publish-sandbox.yml` and publishes only the subpackage's wheel and sdist; `v0.1.6` runs `publish.yml` for ChatTask. Each tag must point at the reviewed, merged default-branch commit and match its package version. The PyPI publisher for each project must name that exact workflow, with no environment unless one is explicitly configured on both sides. The first ChatSandbox release may use PyPI's pending OIDC publisher to create the project; it is not an API-token bootstrap. Source installation alone does not imply a completed registry release.
 
 The client currently uses `opensandbox==1.1.0`. The base install includes Docker support, but selecting a remote profile does not open a Docker connection. The `server` extra adds FastAPI, Uvicorn and the Kubernetes evidence reader. Consumer hosts do not need Kubernetes credentials.
 

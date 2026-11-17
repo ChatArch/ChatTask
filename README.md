@@ -1,6 +1,6 @@
 # ChatTask
 
-[English](README.en.md) | 简体中文
+[英文版](README.en.md) | 简体中文
 
 ChatTask 从 0.1.0 版本起提供可复用的任务模板、受信 Git 源码快照、真实 Sandbox 预检、持久运行记录和显式发布批准，同时保留整数统计 Task 与持续 Shell 实验。0.0.2 是历史包骨架，不包含这些能力；请以 PyPI 实际版本和安装后的 `chattask --version` 为准。
 

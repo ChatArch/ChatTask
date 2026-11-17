@@ -199,7 +199,7 @@ class RecheckTests(unittest.TestCase):
             async def read_bytes(self,path):return archive.getvalue()
         box=SimpleNamespace(id='sandboxfixture',commands=Commands(),files=Files())
         class Service:
-            docker=SimpleNamespace(containers=SimpleNamespace(list=lambda **_:[]))
+            def verify_absent(self, sandbox_id): return True
             async def create(self,**kwargs):return box,None,{'ttl':kwargs['ttl_seconds']}
             async def dispose(self,*args):disposed.append(True)
             def output(self,result):return {'exit_code':0,'stdout':'{"files":1,"bytes":8}','stderr':''}
@@ -210,7 +210,7 @@ class RecheckTests(unittest.TestCase):
             def close(self,ident):
                 gateway_calls.append(('close',ident))
                 return {'closed':True}
-        parent=SimpleNamespace(lock=asyncio.Lock(),settings=TaskSettings('http://127.0.0.1:8000','sandbox-secret'),docker=Service.docker)
+        parent=SimpleNamespace(lock=asyncio.Lock(),settings=TaskSettings('http://127.0.0.1:8000','sandbox-secret'),for_image=lambda image: Service())
         runtime=CodexRuntime('https://gateway.example.test/v1','pending-model',images={'python':'image'})
         executor=CodexTaskExecutor(parent,runtime,gateway=Gateway())
         async def hook(box,command,task,outcome,artifact,runtime):
@@ -219,7 +219,7 @@ class RecheckTests(unittest.TestCase):
         updates=[]
         async def run(selected=executor):
             async def update(item):updates.append(item)
-            with patch('chattask.codex_tasks.TaskService',return_value=Service()):
+            with patch.object(parent, 'for_image', create=True,return_value=Service()):
                 return await selected.execute({'id':'a'*32,'image_profile':'python','instructions':'read only',
                     'capability':{'mode':'verify','plan':{'project':'demo'},'source_task_id':'b'*32},
                     '_input_archive':b'archive'},update,lambda:False)

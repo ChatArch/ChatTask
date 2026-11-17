@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- 通用Sandbox连接、生命周期、运行证据和回收改由同仓库独立ChatSandbox包提供；保留Task任务/历史/产物与现有Docker证据字段。`CHATTASK_SANDBOX_PROFILE`引用显式远程后端配置，与旧endpoint/key互斥，错误不回退Docker。
+- 任务镜像派生、durable Run查验与回收改用provider接口；远程后端不读取本机Docker。Research/Overleaf编译保留独立且显式的Docker能力，并在异常时关闭连接。
+- CI从源码先安装公共子包；Task发布前必须已有兼容的ChatSandbox公开wheel。本次源码变更不切换现有服务或发布registry。
+
 ## 0.1.5 — 2026-11-09
 
 - 研究源码仍保存在原有 Overleaf 私有工程并逐轮读回；PDF 改由独立、无网络、只读根文件系统的临时容器使用原服务镜像与只读公共 TeX 工具链编译。原生辅助程序不再调用原站编译器；编译失败或清理结果不明时保留待核对状态。

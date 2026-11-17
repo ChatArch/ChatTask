@@ -26,6 +26,7 @@ Explicit `research` rounds use caller-verified source records or a bounded autom
 From 0.1.4, a trusted Workspace can create a fixed material snapshot, separately confirm a Run and retrieve a digest-checked report from the real named model. The material-analysis tab shows source provenance and Run history. This read-only executor has no tools or host-file access, and report completion never marks the original proposal complete. See the [configuration and HTTP contract](docs/workspace.en.md).
 
 ```bash
+python -m pip install -e ./packages/chatsandbox
 python -m pip install -e '.[web,dev]'
 chattask --tree
 chattask paths --json-output
@@ -33,7 +34,7 @@ chattask repository register --id demo --path /srv/managed/demo --github-repo ow
 chattask serve --env-profile site --host 127.0.0.1 --port 8000
 ```
 
-Configure the existing OpenSandbox control plane, a site account and an existing PyPI ChatEnv named connection `task-tools` first; see the [integration guide](docs/index.en.md). Only the operator CLI accepts repository paths; the browser selects IDs. Deployed Web, tool, Sandbox and ChatGH acceptance remains with the deployer; source tests use labelled synthetic dependencies.
+Configure the legacy OpenSandbox Docker connection or an explicit ChatSandbox named profile, a site account and an existing PyPI ChatEnv named connection `task-tools`; see the [integration guide](docs/index.en.md) and [shared backends](docs/sandbox-backends.en.md). The independently packaged `packages/chatsandbox/` component is installed from source first and must be publicly released before a new ChatTask version depends on it. Only the operator CLI accepts repository paths; the browser selects IDs. Deployed Web, tool, Sandbox and ChatGH acceptance remains with the deployer; source tests use labelled synthetic dependencies.
 
 ## Boundary
 

@@ -52,11 +52,18 @@ class TaskSettings:
     codex_hosts: str='{}'
     workspace_key: str=field(default='',repr=False)
     analysis_profile: str=''
+    sandbox_profile: str=''
 
     def __post_init__(self):
-        object.__setattr__(self,'endpoint',_origin(self.endpoint))
+        if not isinstance(self.sandbox_profile,str) or self.sandbox_profile and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}',self.sandbox_profile):
+            raise ValueError('Sandbox requires an explicit existing profile name')
+        if self.sandbox_profile:
+            if self.endpoint or self.api_key:
+                raise ValueError('A Sandbox profile cannot be combined with legacy endpoint/key settings')
+        else:
+            object.__setattr__(self,'endpoint',_origin(self.endpoint))
         object.__setattr__(self,'origin',_origin(self.origin))
-        if not isinstance(self.api_key,str) or not self.api_key:
+        if not isinstance(self.api_key,str) or not self.sandbox_profile and not self.api_key:
             raise ValueError('OpenSandbox API key is required')
         if not isinstance(self.image,str) or not self.image or len(self.image)>256:
             raise ValueError('Invalid workload image')
@@ -149,9 +156,10 @@ def load_settings(*,profile: str | None=None,home: str | Path | None=None,overri
         unknown=set(overrides)-set(fields)
         if unknown:raise ValueError('Unknown ChatTask configuration keys: '+', '.join(sorted(unknown)))
         resolved.update(overrides)
-    for key in ('CHATTASK_SANDBOX_ENDPOINT','CHATTASK_SANDBOX_API_KEY'):
-        if not resolved.get(key):raise ValueError('Missing ChatTask configuration: '+key)
-    return TaskSettings(endpoint=resolved['CHATTASK_SANDBOX_ENDPOINT'],api_key=resolved['CHATTASK_SANDBOX_API_KEY'],
+    if not resolved.get('CHATTASK_SANDBOX_PROFILE'):
+        for key in ('CHATTASK_SANDBOX_ENDPOINT','CHATTASK_SANDBOX_API_KEY'):
+            if not resolved.get(key):raise ValueError('Missing ChatTask configuration: '+key)
+    return TaskSettings(endpoint=resolved.get('CHATTASK_SANDBOX_ENDPOINT') or '',api_key=resolved.get('CHATTASK_SANDBOX_API_KEY') or '',
                         origin=resolved['CHATTASK_WEB_ORIGIN'],username=resolved.get('CHATTASK_LOGIN_USERNAME') or '',
                         password=resolved.get('CHATTASK_LOGIN_PASSWORD') or '',
                         login_users_json=resolved.get('CHATTASK_LOGIN_USERS_JSON') or '',
@@ -172,4 +180,5 @@ def load_settings(*,profile: str | None=None,home: str | Path | None=None,overri
                         gateway_ca_file=resolved.get('CHATTASK_GATEWAY_CA_FILE') or '',
                         codex_hosts=resolved.get('CHATTASK_CODEX_HOSTS') or '{}',
                         workspace_key=resolved.get('CHATTASK_WORKSPACE_KEY') or '',
-                        analysis_profile=resolved.get('CHATTASK_ANALYSIS_PROFILE') or '')
+                        analysis_profile=resolved.get('CHATTASK_ANALYSIS_PROFILE') or '',
+                        sandbox_profile=resolved.get('CHATTASK_SANDBOX_PROFILE') or '')

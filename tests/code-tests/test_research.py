@@ -215,6 +215,9 @@ def test_outer_timeout_preserves_pid_without_signals(monkeypatch, tmp_path):
         def terminate(self):
             raise AssertionError("must not terminate")
 
+    # This test supplies a synthetic process; its start identity must not
+    # depend on Linux /proc being available on the test runner.
+    monkeypatch.setattr(research_module, "_process_state", lambda pid: ("running", "synthetic-start"))
     monkeypatch.setattr(subprocess, "Popen", TimedProcess)
     bridge = DockerOverleafBridge("example-container", "http://internal.example", compiler=SyntheticCompilerPreflight())
     with pytest.raises(ResearchUnavailable):

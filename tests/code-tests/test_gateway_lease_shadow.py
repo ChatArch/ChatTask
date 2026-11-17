@@ -17,6 +17,7 @@ class GatewayLeaseIdentityTests(unittest.TestCase):
   box=N(id='sandboxfixture',commands=Commands(),files=Files())
   class Service:
    docker=N(containers=N(list=lambda **kwargs:[]))
+   def verify_absent(self, sandbox_id): return True
    async def create(self,**kwargs):return box,None,{}
    async def dispose(self,*args):disposed.append(True)
    def output(self,execution):return {'exit_code':0,'stdout':'','stderr':'','error':None}
@@ -27,7 +28,7 @@ class GatewayLeaseIdentityTests(unittest.TestCase):
    parent=N(lock=asyncio.Lock(),settings=TaskSettings('http://127.0.0.1:8000','example-sandbox-key'),docker=Service.docker)
    executor=CodexTaskExecutor(parent,CodexRuntime('https://gateway.example.test/v1','pending',images={'python':'image'}),gateway=Gateway())
    async def update(step):pass
-   with patch('chattask.codex_tasks.TaskService',return_value=Service()):return await executor.execute({'id':'a'*32,'image_profile':'python','instructions':'fixture','capability':{'mode':'publish','plan':{}}},update,lambda:False)
+   with patch.object(parent, 'for_image', create=True,return_value=Service()):return await executor.execute({'id':'a'*32,'image_profile':'python','instructions':'fixture','capability':{'mode':'publish','plan':{}}},update,lambda:False)
   result=asyncio.run(run());self.assertFalse(result['ok']);self.assertIn('native completion',result['error']);self.assertTrue(disposed);self.assertEqual(closed,['a'*32]);self.assertEqual(result['credential_closure'],{'closed':True})
  def test_invalid_verify_input_is_rejected_before_grant(self):
   issued=[]

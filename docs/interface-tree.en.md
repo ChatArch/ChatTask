@@ -8,7 +8,10 @@ CLI and Web share importable business APIs. `import chattask` itself does not co
 ```text
 chattask
 ├── TaskSettings / settings.load_settings(profile=..., home=...)
-├── TaskService                    # Existing integer task and persistent Shell
+├── TaskService(settings, backend=...) # Task orchestration over ChatSandbox
+│   ├── for_image(image) / connection() / connect(id, connection)
+│   ├── create(ttl_seconds=600, durable_run_id=None) / inspect_owned(id)
+│   ├── find_run_sandboxes(run_id) / verify_absent(id) / dispose(sandbox, connection)
 │   ├── once(values)
 │   ├── open_session() / run_session(id, command) / close_session(id)
 │   └── sweep() / shutdown()

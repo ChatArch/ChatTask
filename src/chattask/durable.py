@@ -770,19 +770,24 @@ async def run_worker(settings, *, once=False):
     from .codex_tasks import configured_executor
     store = TaskStore(state_paths(home=settings.home)["state_dir"])
     sandbox = TaskService(settings)
-    executor = configured_executor(settings, sandbox)
-    if executor is None:
-        raise ValueError("durable worker requires configured Codex gateway")
-    publisher = None
-    if settings.research_container and settings.research_origin:
-        from .research import ResearchPublisher, DockerOverleafBridge
-        from .research_compiler import IsolatedResearchCompiler
-        publisher = ResearchPublisher(store.root / 'research',
-                                      DockerOverleafBridge(settings.research_container, settings.research_origin,
-                                          compiler=IsolatedResearchCompiler(sandbox.docker,
-                                              store.root / 'research-compiler', settings.research_container)))
-    tasks = DurableTaskService(store, executor, research_publisher=publisher, research_origin=settings.research_origin)
+    research_docker = None
     try:
+        executor = configured_executor(settings, sandbox)
+        if executor is None:
+            raise ValueError("durable worker requires configured Codex gateway")
+        publisher = None
+        if settings.research_container and settings.research_origin:
+            # Publishing to an existing Overleaf is a separate host capability;
+            # a remote Sandbox provider must never initialize Docker implicitly.
+            import docker
+            from .research import ResearchPublisher, DockerOverleafBridge
+            from .research_compiler import IsolatedResearchCompiler
+            research_docker = docker.from_env()
+            publisher = ResearchPublisher(store.root / 'research',
+                                          DockerOverleafBridge(settings.research_container, settings.research_origin,
+                                              compiler=IsolatedResearchCompiler(research_docker,
+                                                  store.root / 'research-compiler', settings.research_container)))
+        tasks = DurableTaskService(store, executor, research_publisher=publisher, research_origin=settings.research_origin)
         with executor_lock(store):
             while True:
                 result = await tasks.worker_once()
@@ -791,7 +796,12 @@ async def run_worker(settings, *, once=False):
                 if result is None:
                     await asyncio.sleep(2)
     finally:
-        await sandbox.shutdown()
+        try:
+            await sandbox.shutdown()
+        finally:
+            if research_docker is not None:
+                research_docker.close()
+
 
 
 def configured_service(settings):

@@ -123,8 +123,7 @@ class SandboxExecutor:
                 try:
                     await self.task_service.dispose(sandbox, cfg)
                     cleanup['requested'] = True
-                    cleanup['container_absent'] = not any(c.name == 'sandbox-' + sandbox_id
-                        for c in self.task_service.docker.containers.list(all=True))
+                    cleanup['container_absent'] = self.task_service.verify_absent(sandbox_id)
                 except Exception as exc:
                     cleanup['error'] = type(exc).__name__
                     cleanup['container_absent'] = False

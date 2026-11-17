@@ -72,13 +72,14 @@ class CodexTaskTests(unittest.TestCase):
         sandbox=SimpleNamespace(id='fixture-sandbox',commands=Commands())
         class Service:
             docker=SimpleNamespace(containers=SimpleNamespace(list=lambda **_:[]))
+            def verify_absent(self, sandbox_id): return True
             async def create(self,**kwargs):return sandbox,None,{}
             async def dispose(self,*args):pass
         parent=SimpleNamespace(lock=asyncio.Lock(),settings=TaskSettings('http://127.0.0.1:8000','fixture'),docker=Service.docker)
         runtime=CodexRuntime('http://127.0.0.1:8001/v1','fixture',images={'python':'example.test/image:1'})
         async def run():
             async def update(step):pass
-            with patch('chattask.codex_tasks.TaskService',return_value=Service()):
+            with patch.object(parent, 'for_image', create=True,return_value=Service()):
                 await CodexTaskExecutor(parent,runtime).execute({'image_profile':'python','instructions':'test'},update,lambda:False)
         asyncio.run(run())
         self.assertEqual(calls[0],'/')
@@ -102,6 +103,7 @@ class CodexTaskTests(unittest.TestCase):
         box=SimpleNamespace(id='fixture',commands=Commands(),files=Files())
         class Service:
             docker=SimpleNamespace(containers=SimpleNamespace(list=lambda **_:[]))
+            def verify_absent(self, sandbox_id): return True
             async def create(self,**kwargs):return box,None,{}
             async def dispose(self,*args):pass
             def output(self,result):return {'exit_code':0,'stdout':'','stderr':''}
@@ -113,7 +115,7 @@ class CodexTaskTests(unittest.TestCase):
         runtime=CodexRuntime('https://gateway.example.test/v1','pending',images={'python':'image'},ca_certificate=b'-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n')
         async def run():
             async def update(step):pass
-            with patch('chattask.codex_tasks.TaskService',return_value=Service()):
+            with patch.object(parent, 'for_image', create=True,return_value=Service()):
                 return await CodexTaskExecutor(parent,runtime,gateway=Gateway()).execute(
                     {'id':'a'*32,'image_profile':'python','instructions':'test'},update,lambda:False)
         asyncio.run(run())
@@ -163,13 +165,14 @@ class CodexTaskTests(unittest.TestCase):
         box=SimpleNamespace(id='fixture',commands=Commands(),files=Files())
         class Service:
             docker=SimpleNamespace(containers=SimpleNamespace(list=lambda **_:[]))
+            def verify_absent(self, sandbox_id): return True
             async def create(self,**kwargs):return box,None,{}
             async def dispose(self,*args):pass
         parent=SimpleNamespace(lock=asyncio.Lock(),settings=TaskSettings('http://127.0.0.1:8000','fixture'),docker=Service.docker)
         runtime=CodexRuntime('http://127.0.0.1:8001/v1','token-canary',images={'python':'example.test/image:1'})
         async def run():
             async def update(step):pass
-            with patch('chattask.codex_tasks.TaskService',return_value=Service()):
+            with patch.object(parent, 'for_image', create=True,return_value=Service()):
                 result=await CodexTaskExecutor(parent,runtime).execute({'image_profile':'python','instructions':'test'},update,lambda:False)
             transcript=next(a for a in result['artifacts'] if a['name']=='codex.events.jsonl')
             self.assertNotIn(b'token-canary',transcript['data'])

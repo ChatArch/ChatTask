@@ -88,6 +88,11 @@ jobs:
       - name: Build distribution
         if: steps.pypi.outputs.exists == 'false'
         run: |
+          # ChatSandbox is independently packaged in this monorepo. Its
+          # compatible public release must exist before publishing ChatTask.
+          python -m pip download --no-deps --only-binary=:all: \
+            --dest "${RUNNER_TEMP}/chatsandbox-release-dependency" \
+            "ChatSandbox>=0.1.0,<0.2.0"
           python -m pip install --upgrade pip build twine
           python -m build
           python -m twine check dist/*

@@ -41,6 +41,7 @@ plugins:
             Python 接口树: Python Interface Tree
             通用任务与镜像: Generic Tasks and Images
             Workspace 材料分析: Workspace Material Analysis
+            公共 Sandbox 后端: Shared Sandbox Backends
 markdown_extensions:
   - admonition
   - attr_list
@@ -66,6 +67,7 @@ nav:
   - 首页: index.md
   - 通用任务与镜像: tasks.md
   - Workspace 材料分析: workspace.md
+  - 公共 Sandbox 后端: sandbox-backends.md
   - 命令与接口:
       - CLI 树: cli-tree.md
       - 能力地图: capability-map.md

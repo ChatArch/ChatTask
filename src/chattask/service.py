@@ -4,15 +4,9 @@ import asyncio
 import json
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
-from urllib.parse import urlsplit
-import docker
-import httpx
-from opensandbox import Sandbox
-from opensandbox.manager import SandboxManager
-from opensandbox.models.sandboxes import SandboxFilter
-from opensandbox.config import ConnectionConfig
+from chatsandbox import create_backend_from_profile, create_docker_backend
 from opensandbox.models import WriteEntry
 from .settings import TaskSettings
 
@@ -24,114 +18,55 @@ class Session:
     expires_at: float
 
 class TaskService:
-    def __init__(self, settings: TaskSettings, *, docker_client=None):
+    def __init__(self, settings: TaskSettings, *, backend=None, docker_client=None):
         self.settings = settings
         self.session: Session | None = None
         self.lock = asyncio.Lock()
-        self.docker = docker_client if docker_client is not None else docker.from_env()
+        if backend is not None and docker_client is not None:
+            raise ValueError('Choose a Sandbox backend or a legacy Docker client')
+        if backend is not None:
+            self.backend = backend
+        elif settings.sandbox_profile:
+            if docker_client is not None:
+                raise ValueError('A named Sandbox profile cannot use a legacy Docker client')
+            self.backend = create_backend_from_profile(settings.sandbox_profile, home=settings.home)
+        else:
+            self.backend = create_docker_backend(settings.endpoint, settings.api_key,
+                                                 settings.image, docker_client=docker_client)
 
-    def connection(self) -> ConnectionConfig:
-        endpoint = urlsplit(self.settings.endpoint)
-        return ConnectionConfig(
-            domain=endpoint.netloc, api_key=self.settings.api_key,
-            protocol=endpoint.scheme, use_server_proxy=False,
-            transport=httpx.AsyncHTTPTransport(),
-            request_timeout=timedelta(seconds=30), disable_metrics=True,
-        )
+    def connection(self):
+        return self.backend.connection()
 
-    async def connect(self, sandbox_id: str, cfg: ConnectionConfig) -> Sandbox:
-        return await Sandbox.connect(sandbox_id, connection_config=cfg)
+    def for_image(self, image: str):
+        """Keep the selected provider when a task chooses an allowed image."""
+        return type(self)(replace(self.settings, image=image), backend=self.backend.for_image(image))
+
+    async def connect(self, sandbox_id: str, cfg):
+        return await self.backend.connect(sandbox_id, cfg)
 
     def inspect_owned(self, sandbox_id: str) -> dict:
-        matched = [c for c in self.docker.containers.list(all=True)
-                   if c.name == 'sandbox-' + sandbox_id]
-        if len(matched) != 1:
-            raise RuntimeError('sandbox container identity missing or ambiguous')
-        matched[0].reload()
-        attrs = matched[0].attrs
-        h = attrs['HostConfig']
-        ports = attrs['NetworkSettings']['Ports']
-        published = [entry for group in ports.values() if group for entry in group]
-        if not published or any(entry['HostIp'] != '127.0.0.1' for entry in published):
-            raise RuntimeError('sandbox port unexpectedly exposed off loopback')
-        if h['Privileged'] or h['Memory'] != 512 * 1024 * 1024 or h['NanoCpus'] != 1_000_000_000 or h['PidsLimit'] != 128 or attrs['Mounts']:
-            raise RuntimeError('sandbox resource or mount contract mismatch')
-        return {'container_id': attrs['Id'][:12], 'host_ports': [int(e['HostPort']) for e in published],
-                'image_id': attrs['Image'], 'runtime': h.get('Runtime') or 'runc',
-                'memory_bytes': h['Memory'], 'nano_cpus': h['NanoCpus'],
-                'pids_limit': h['PidsLimit'], 'privileged': h['Privileged'],
-                'mount_count': len(attrs['Mounts'])}
+        return self.backend.inspect_owned(sandbox_id)
+
+    def verify_absent(self, sandbox_id: str) -> bool:
+        """Provider inventory must positively establish absence; errors propagate."""
+        return self.backend.verify_absent(sandbox_id) is True
 
     async def find_run_sandboxes(self, run_id: str) -> list[str]:
-        """Read controller metadata for a durable Run; any uncertain list fails closed."""
+        """Resolve task-owned metadata through the shared provider's inventory."""
         if not isinstance(run_id, str) or len(run_id) != 32 or any(c not in '0123456789abcdef' for c in run_id):
             raise ValueError('invalid durable Run id')
-        cfg = self.connection()
-        manager = None
-        try:
-            manager = await SandboxManager.create(connection_config=cfg)
-            found = []
-            inventory = {}
-            total = None
-            for page in range(1, 101):
-                result = await manager.list_sandbox_infos(SandboxFilter(page=page, page_size=100))
-                if total is None:
-                    total = result.pagination.total_items
-                if result.pagination.page != page or result.pagination.total_items != total or total > 10000 or (result.pagination.has_next_page and not result.sandbox_infos):
-                    raise RuntimeError('sandbox inventory ambiguous')
-                for info in result.sandbox_infos:
-                    if info.id in inventory:
-                        raise RuntimeError('duplicate sandbox inventory identity')
-                    inventory[info.id] = info.metadata or {}
-                    if info.metadata and info.metadata.get('purpose') == 'chattask' and info.metadata.get('durable_run_id') == run_id:
-                        found.append(info.id)
-                if not result.pagination.has_next_page:
-                    if not found:
-                        # A controller that drops metadata cannot prove absence when a
-                        # Docker Sandbox remains. Keep the fence until it is resolved.
-                        for container in self.docker.containers.list(all=True):
-                            if container.name.startswith('sandbox-'):
-                                metadata = inventory.get(container.name.removeprefix('sandbox-'))
-                                if metadata is None or not metadata.get('durable_run_id'):
-                                    raise RuntimeError('sandbox ownership metadata unavailable')
-                    return found
-            raise RuntimeError('sandbox inventory too large')
-        finally:
-            if manager is not None:
-                await manager.close()
-            await cfg.transport.aclose()
+        return await self.backend.find_owned({'purpose': 'chattask', 'durable_run_id': run_id})
 
-    async def create(self, *, ttl_seconds: int = 600, durable_run_id: str | None = None) -> tuple[Sandbox, ConnectionConfig, dict]:
+    async def create(self, *, ttl_seconds: int = 600, durable_run_id: str | None = None):
         if type(ttl_seconds) is not int or not 60 <= ttl_seconds <= 7200:
             raise ValueError('sandbox lifetime must be 60–7200 seconds')
         if durable_run_id is not None and (not isinstance(durable_run_id, str) or len(durable_run_id) != 32 or any(c not in '0123456789abcdef' for c in durable_run_id)):
             raise ValueError('invalid durable Run id')
-        cfg = self.connection()
-        sandbox = None
-        try:
-            sandbox = await Sandbox.create(
-                self.settings.image, entrypoint=['/bin/sh', '-c', 'sleep '+str(ttl_seconds)],
-                timeout=timedelta(seconds=ttl_seconds), ready_timeout=timedelta(seconds=35),
-                resource={'cpu': '1', 'memory': '512Mi'},
-                metadata={'purpose': 'chattask', **({'durable_run_id': durable_run_id} if durable_run_id else {})},
-                connection_config=cfg,
-            )
-            details = self.inspect_owned(sandbox.id)
-            return sandbox, cfg, details
-        except BaseException:
-            if sandbox is not None:
-                try:
-                    await asyncio.wait_for(sandbox.destroy(), timeout=15)
-                except Exception:
-                    pass
-            await cfg.transport.aclose()
-            raise
+        return await self.backend.create(ttl_seconds=ttl_seconds,
+            metadata={'purpose': 'chattask', **({'durable_run_id': durable_run_id} if durable_run_id else {})})
 
-    async def dispose(self, sandbox: Sandbox, cfg: ConnectionConfig) -> None:
-        try:
-            await asyncio.wait_for(sandbox.destroy(), timeout=15)
-        finally:
-            await cfg.transport.aclose()
+    async def dispose(self, sandbox, cfg) -> None:
+        await self.backend.dispose(sandbox, cfg)
 
     @staticmethod
     def output(execution) -> dict:
@@ -191,7 +126,7 @@ class TaskService:
                 try:
                     await self.dispose(sandbox, cfg)
                     cleanup['requested'] = True
-                    cleanup['container_absent'] = not any(c.name == 'sandbox-' + sandbox_id for c in self.docker.containers.list(all=True))
+                    cleanup['container_absent'] = self.verify_absent(sandbox_id)
                 except Exception as exc:
                     cleanup['error'] = type(exc).__name__
             if result is None:
@@ -254,9 +189,8 @@ class TaskService:
                     await asyncio.wait_for(sandbox.commands.delete_session(s.shell_id), timeout=8)
                 except Exception:
                     pass
-                await asyncio.wait_for(sandbox.destroy(), timeout=15)
-                deleted = not any(c.name == 'sandbox-' + s.sandbox_id
-                                  for c in self.docker.containers.list(all=True))
+                await self.dispose(sandbox, cfg)
+                deleted = self.verify_absent(s.sandbox_id)
             finally:
                 await sandbox.close()
         finally:
@@ -283,10 +217,10 @@ class TaskService:
                         pass
 
     async def shutdown(self):
-        """Explicitly retire this service's owned session and Docker client."""
+        """Explicitly retire this service's owned session and shared backend."""
         try:
             if self.session:
                 await self.close_session(self.session.id)
         finally:
-            self.docker.close()
+            await self.backend.close()
 

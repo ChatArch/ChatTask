@@ -28,6 +28,8 @@ def test_native_resource_quantities_and_metadata_encoding():
     {'resourceLimits': {'cpu': 'NaN', 'memory': '512Mi'}},
     {'resourceLimits': {'cpu': '0.0001', 'memory': '512Mi'}},
     {'resourceLimits': {'cpu': '1', 'memory': '0Mi'}},
+    {'resourceLimits': {'cpu': '1m', 'memory': '512Mi'}},
+    {'resourceLimits': {'cpu': '1', 'memory': '32Mi'}},
     {'resourceRequests': {'cpu': '500m', 'memory': '512Mi'}},
     {'timeout': True}, {'timeout': 7201}, {'volumes': [{'hostPath': '/'}]},
     {'networkPolicy': {'defaultAction': 'allow'}}, {'metadata': {OWNER: 'forged'}},

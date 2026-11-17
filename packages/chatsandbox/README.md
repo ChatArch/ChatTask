@@ -109,6 +109,8 @@ CRS validates caller identity and an explicit Sandbox grant without invoking the
 
 Create TTLs are 60–7200 seconds and may be further restricted by the grant or Key expiry. Renewing an instance cannot reset its original maximum deadline. Expiry alone does not prove that a workload was removed, so pending, active, deleting and uncertain reservations still count until absence is positively verified.
 
+Gateway requests require at least 100m CPU and 64Mi memory, matching the fixed init container's requests/limits. Since the init container finishes before the main container starts, this keeps the effective Pod request within the caller's reserved CPU/memory. The namespace also applies its independent resource quota and per-container limits.
+
 If a create response is lost, keep its request identity. Callers that supply `Idempotency-Key` must retry the same body with the same key; changing the body conflicts. The native SDK does not automatically supply this header. A 503 response can contain `request_id`, which can be checked through the operation endpoint; an uncertain creation remains reserved while runtime inventory is reconciled. Do not issue an unrelated create to assume the first one failed. ChatTask additionally uses durable Run metadata and its existing model/tool lease fences.
 
 An ordinary failed connection or missing HTTP record does not confirm cleanup. Remote `dispose()` waits for positive absence evidence, and unresolved cleanup remains an error for the consumer to reconcile.

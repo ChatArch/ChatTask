@@ -49,7 +49,9 @@ def create_policy(body):
         match=re.fullmatch(r'([0-9]+)(Mi|Gi)',str(limits['memory']))
         if not match: raise ValueError()
         memory=int(match[1])*(1024 if match[2]=='Gi' else 1)
-        if not 0<memory<=2**31-1 or cpu>2**31-1: raise ValueError()
+        # The fixed init container requests 100m/64Mi. Requiring at least
+        # that much keeps the Pod's effective budget within this reservation.
+        if not 64<=memory<=2**31-1 or not 100<=cpu<=2**31-1: raise ValueError()
     except (InvalidOperation,TypeError,ValueError,OverflowError):
         raise AccessDenied(400,'invalid_sandbox_resources') from None
     ttl=body.get('timeout',600)

@@ -1,5 +1,10 @@
 # 更新记录
 
+## 未发布
+
+- 增加固定基础镜像和 wheel 摘要的 SymPy 示例环境，以及只在默认分支手动发布的 Sandbox Image 工作流。CI 以短期 GITHUB_TOKEN 推送 GHCR，同时交付 manifest digest 保真的 OCI 归档和发布回执。
+- 增加已批准 digest 的公网 SDK 示例与中英文镜像创建、发布、节点接入说明；Registry 权限和 Sandbox caller grant 分离，保持现有包协议与 CLI 不变。
+
 ## 0.1.6 — 2026-11-17
 
 - 通用Sandbox连接、生命周期、运行证据和回收改由同仓库独立ChatSandbox包提供；保留Task任务/历史/产物与现有Docker证据字段。`CHATTASK_SANDBOX_PROFILE`引用显式远程后端配置，与旧endpoint/key互斥，错误不回退Docker。

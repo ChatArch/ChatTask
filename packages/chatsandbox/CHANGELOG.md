@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add repository image sources, a bounded SymPy example, CI publication and OCI handoff metadata, plus an SDK example for an approved immutable image. Installed Python APIs and CLI commands remain unchanged.
+
 ## 0.1.0 — 2026-11-17
 
 - Extract shared OpenSandbox connections, lifecycle, runtime receipts and cleanup from ChatTask. Preserve legacy Docker receipts and make the remote provider an explicit named ChatEnv profile.

@@ -1,0 +1,155 @@
+name: Sandbox Image
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/publish-sandbox-image.yml
+      - packages/chatsandbox/images/**
+      - scripts/sandbox_image_release.py
+      - tests/code-tests/test_sandbox_image_release.py
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Checked-in directory under packages/chatsandbox/images
+        required: true
+        default: python-sympy
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-image-${{ github.ref }}-${{ inputs.image || 'python-sympy' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      image: ${{ steps.plan.outputs.image }}
+      repository: ${{ steps.plan.outputs.repository }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare image plan
+        id: plan
+        env:
+          IMAGE: ${{ inputs.image || 'python-sympy' }}
+          NAMESPACE: ${{ vars.SANDBOX_IMAGE_NAMESPACE || github.repository_owner }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sandbox-image"
+          python scripts/sandbox_image_release.py plan \
+            --namespace "${NAMESPACE,,}" --image "$IMAGE" --source-commit "$GITHUB_SHA" --workflow-run-id "$GITHUB_RUN_ID" \
+            --output "$RUNNER_TEMP/sandbox-image/image-plan.json" --github-output "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build one linux/amd64 image and OCI archive
+        uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: ${{ steps.plan.outputs.context }}
+          platforms: linux/amd64
+          tags: ${{ steps.plan.outputs.tag }}
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          outputs: type=oci,dest=${{ runner.temp }}/sandbox-image/image.oci.tar
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Exercise the image without network or host mounts
+        env:
+          IMAGE_TAG: ${{ steps.plan.outputs.tag }}
+          IMAGE_CONTEXT: ${{ steps.plan.outputs.context }}
+        run: |
+          docker run --rm --network none --read-only --cpus 1 --memory 512m --pids-limit 128 \
+            --cap-drop ALL --security-opt no-new-privileges "$IMAGE_TAG" \
+            python /opt/chatsandbox-examples/workload.py --self-test \
+            > "$RUNNER_TEMP/sandbox-image/smoke-result.json"
+          cp "$IMAGE_CONTEXT/Dockerfile" "$IMAGE_CONTEXT/requirements.lock" "$IMAGE_CONTEXT/workload.py" \
+            "$RUNNER_TEMP/sandbox-image/"
+          python scripts/sandbox_image_release.py receipt \
+            --plan "$RUNNER_TEMP/sandbox-image/image-plan.json" \
+            --archive "$RUNNER_TEMP/sandbox-image/image.oci.tar" \
+            --output "$RUNNER_TEMP/sandbox-image/image-release.json"
+          cd "$RUNNER_TEMP/sandbox-image"
+          sha256sum image.oci.tar > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-image-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sandbox-image/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: sandbox-image-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sandbox-image/
+      - name: Install OCI transport
+        run: |
+          if ! command -v skopeo; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends skopeo
+          fi
+      - name: Push the same OCI manifest with the short-lived workflow identity
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          IMAGE_TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | skopeo login --authfile "$RUNNER_TEMP/ghcr-auth.json" \
+            --username "$GHCR_USER" --password-stdin ghcr.io
+          cd "$RUNNER_TEMP/sandbox-image"
+          sha256sum --check SHA256SUMS
+          skopeo copy --preserve-digests --dest-authfile "$RUNNER_TEMP/ghcr-auth.json" \
+            --digestfile registry-digest.txt oci-archive:image.oci.tar "docker://$IMAGE_TAG"
+          skopeo inspect --authfile "$RUNNER_TEMP/ghcr-auth.json" --raw "docker://$IMAGE_TAG" \
+            > registry-manifest.json
+          sha256sum registry-manifest.json | cut -d ' ' -f 1 > registry-manifest.sha256
+          python "$GITHUB_WORKSPACE/scripts/sandbox_image_release.py" receipt \
+            --plan image-plan.json --archive image.oci.tar --copied-digest registry-digest.txt \
+            --output image-release.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          receipt = json.loads(Path('image-release.json').read_text())
+          assert receipt['manifest_digest'] == 'sha256:' + Path('registry-manifest.sha256').read_text().strip()
+          with Path(__import__('os').environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
+              summary.write('Published image: `' + receipt['image_ref'] + '`\n\n')
+              summary.write('Platform: `linux/amd64`. Import and grant approval remain separate operator steps.\n')
+          PY
+      - name: Remove registry login
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/ghcr-auth.json"; then
+            skopeo logout --authfile "$RUNNER_TEMP/ghcr-auth.json" ghcr.io
+            rm -f "$RUNNER_TEMP/ghcr-auth.json"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-image-${{ needs.build.outputs.image }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/sandbox-image/
+          if-no-files-found: error
+          retention-days: 7

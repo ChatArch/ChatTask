@@ -42,6 +42,7 @@ plugins:
             通用任务与镜像: Generic Tasks and Images
             Workspace 材料分析: Workspace Material Analysis
             公共 Sandbox 后端: Shared Sandbox Backends
+            Sandbox 镜像发布: Sandbox Image Publishing
 markdown_extensions:
   - admonition
   - attr_list
@@ -68,6 +69,7 @@ nav:
   - 通用任务与镜像: tasks.md
   - Workspace 材料分析: workspace.md
   - 公共 Sandbox 后端: sandbox-backends.md
+  - Sandbox 镜像发布: sandbox-images.md
   - 命令与接口:
       - CLI 树: cli-tree.md
       - 能力地图: capability-map.md

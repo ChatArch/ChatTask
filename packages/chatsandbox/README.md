@@ -38,7 +38,7 @@ CHATSANDBOX_IMAGE=registry.example.test/approved-python@sha256:<operator-verifie
 CHATSANDBOX_KEY_PROFILE=CRS/main
 ```
 
-The image must already be available to the selected backend and explicitly allowed by the caller's Sandbox grant. The package does not build, publish or silently substitute images.
+The image must already be available to the selected backend and explicitly allowed by the caller's Sandbox grant. The package does not build, publish or silently substitute images. The repository also supplies a reviewed SymPy image, a GitHub Actions publication workflow and an immutable-image SDK example; see [image publishing](https://arch.gh.wzhecnu.cn/ChatTask/sandbox-images/). Registry publication, node availability and caller grant approval are separate steps.
 
 Select exactly one credential authority:
 

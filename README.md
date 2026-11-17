@@ -1,6 +1,6 @@
 # ChatTask
 
-[English](README.en.md) | 简体中文
+[英文版](README.en.md) | 简体中文
 
 ChatTask 从 0.1.0 版本起提供可复用的任务模板、受信 Git 源码快照、真实 Sandbox 预检、持久运行记录和显式发布批准，同时保留整数统计 Task 与持续 Shell 实验。0.0.2 是历史包骨架，不包含这些能力；请以 PyPI 实际版本和安装后的 `chattask --version` 为准。
 
@@ -41,3 +41,7 @@ chattask serve --env-profile site --host 127.0.0.1 --port 8000
 这是受信单用户服务。项目的构建/测试代码仅在 Sandbox 内执行；普通 Docker/runc 不等于强隔离。运行记录持久化，重启后中断的执行标为待核对且不会自动重放不确定写入。登录会话和旧 Shell 历史仍不跨重启恢复。代码候选不代表已部署或已发布。
 
 [CLI 树](docs/cli-tree.md) · [能力地图](docs/capability-map.md) · [Python API](docs/interface-tree.md)
+
+## Sandbox 镜像发布
+
+仓库提供预装 SymPy 的最小 Python 镜像、固定依赖和 GitHub Actions 构建/发布工作流。客户端无需安装 Docker；运行结果使用固定 digest，经节点导入与 caller 明确批准后通过现有 SDK 使用。参见[镜像创建、发布与接入](docs/sandbox-images.md)。

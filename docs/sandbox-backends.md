@@ -68,3 +68,7 @@ chatsandbox --tree
 ```
 
 首次公开发布应先完成 ChatSandbox 的 PR、检查、合并、标签及 PyPI 产物验收，再发布依赖其兼容版本的 ChatTask。Task 的 tag workflow 会先检查兼容 ChatSandbox wheel 可用，阻止发布缺少依赖的发行包。本次源码变更本身不发布 registry、不切换现有服务；真实 Docker/K8s、SDK、网页和模型/工具链路由部署验收另行确认。
+
+## 创建和发布环境镜像
+
+镜像源码、固定依赖、CI 发布与节点接入流程见[Sandbox 镜像发布](sandbox-images.md)。Registry 发布身份与调用方 Key 分开；实际运行仍以该 caller 的精确镜像批准和资源预算为准。

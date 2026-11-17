@@ -179,12 +179,12 @@ def test_invalid_lifetimes_do_not_call_the_sdk(ttl):
 
 def test_dispose_waits_for_verified_absence_and_always_closes_transport(monkeypatch):
     monkeypatch.setattr(module.asyncio, 'sleep', AsyncMock())
-    evidence = SimpleNamespace(verify_absent=Mock(side_effect=[False, True]))
+    evidence = SimpleNamespace(verify_absent=Mock(side_effect=[RuntimeError('terminating'), False, True]))
     backend, cfg = configured_backend(evidence=evidence)
     sandbox = SimpleNamespace(id='owned', destroy=AsyncMock())
     asyncio.run(backend.dispose(sandbox, cfg))
     sandbox.destroy.assert_awaited_once()
-    assert evidence.verify_absent.call_count == 2
+    assert evidence.verify_absent.call_count == 3
     cfg.transport.aclose.assert_awaited_once()
     evidence.verify_absent.side_effect = None
     evidence.verify_absent.return_value = False

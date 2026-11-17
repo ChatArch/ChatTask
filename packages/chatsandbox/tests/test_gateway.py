@@ -142,6 +142,17 @@ def test_sdk_eager_egress_discovery_does_not_enable_egress_traffic(service):
     assert not any('/18080' in str(r.url) for r in native.requests)
 
 
+def test_terminating_pod_is_reported_deleting_until_absence_is_proven(service):
+    client,native,evidence,verifier,ledger=service
+    sid=create(client).json()['id'];row=ledger.all()[0]
+    ledger.state(row['request_id'],'deleting');evidence.attested=False
+    response=client.get('/v1/sandboxes/'+sid+'/evidence',headers={'OPEN-SANDBOX-API-KEY':'alice-key'})
+    assert response.status_code==200 and response.json()['state']=='deleting'
+    assert response.json()['runtime'] is None and ledger.all()[0]['state']=='deleting'
+    native.items.pop(sid)
+    assert client.get('/v1/sandboxes/'+sid+'/evidence',headers={'OPEN-SANDBOX-API-KEY':'alice-key'}).json()['state']=='absent'
+
+
 def test_uncertain_create_remains_reserved(service):
     client,native,evidence,verifier,ledger=service
     original=native.handle

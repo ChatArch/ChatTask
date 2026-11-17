@@ -178,6 +178,8 @@ def create_app(settings,*,verifier,evidence,ledger,transport=None,reconcile_inte
             if await run_in_threadpool(evidence.verify_absent,sandbox_id):
                 await run_in_threadpool(ledger.state,row['request_id'],'absent')
                 return {'sandbox_id':sandbox_id,'owned':True,'state':'absent','runtime':None}
+            if row['state']=='deleting':
+                return {'sandbox_id':sandbox_id,'owned':True,'state':'deleting','runtime':None}
             runtime=await checked_runtime(row)
             return {'sandbox_id':sandbox_id,'owned':True,'state':'active','runtime':runtime}
         if row['state']=='absent': raise AccessDenied(404,'sandbox_not_found')

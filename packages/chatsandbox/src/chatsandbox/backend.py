@@ -159,7 +159,12 @@ class SandboxBackend:
             await asyncio.wait_for(sandbox.destroy(), timeout=15)
             if self.settings.provider == 'remote':
                 for _ in range(20):
-                    if self.verify_absent(sandbox.id): break
+                    try:
+                        if self.verify_absent(sandbox.id): break
+                    except (RuntimeError,httpx.HTTPError):
+                        # A terminating Pod or temporary evidence failure is
+                        # not proof of absence. Retry within the same bound.
+                        pass
                     await asyncio.sleep(.5)
                 else: raise RuntimeError('Sandbox cleanup was not verified')
         finally:

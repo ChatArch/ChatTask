@@ -101,6 +101,8 @@ Native ingress signatures and secure headers remain on the gateway. The public c
 
 Other application ports, arbitrary web hosting, pause/resume, snapshots, mounted volumes, custom extensions/network policy and the full code-interpreter API are outside this initial surface. The gateway strips browser cookies and authentication headers when forwarding guest traffic, rejects redirects and applies a restrictive response policy. SDK compatibility here does not claim that every OpenSandbox feature is enabled.
 
+SDK 1.1.0 eagerly discovers port 18080 during ordinary create/connect even without an egress sidecar. The gateway returns a disabled public endpoint for that discovery only, with no access capability. It never forwards traffic to port 18080; egress-policy operations remain unavailable and the grant still permits only execd port 44772.
+
 ## Budgets, lifetime and uncertain operations
 
 CRS validates caller identity and an explicit Sandbox grant without invoking the model business path. Grants specify actions, images, ports, concurrent instances, aggregate CPU/memory and maximum lifetime. The gateway reserves budgets atomically in its private SQLite ledger under `$CHATARCH_HOME/chatsandbox/state/` before forwarding a create.

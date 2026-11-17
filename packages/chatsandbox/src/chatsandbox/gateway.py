@@ -192,6 +192,12 @@ def create_app(settings,*,verifier,evidence,ledger,transport=None,reconcile_inte
             grant.require('connect')
             try: port=int(subpath.removeprefix('endpoints/'))
             except ValueError: raise AccessDenied(400,'invalid_port') from None
+            if port==18080:
+                # SDK 1.1.0 eagerly resolves this endpoint even when no egress
+                # sidecar exists. Discovery must succeed for connect/create;
+                # issue no capability and never forward this disabled port.
+                await checked_runtime(row)
+                return {'endpoint':urlsplit(settings.public_origin).netloc+'/runtime/'+sandbox_id+'/18080','headers':{}}
             if port not in grant.ports or port!=44772: raise AccessDenied(403,'sandbox_port_denied')
             await checked_runtime(row)
             deadline=int(min(row['max_deadline'],grant.expires_at or float('inf')))

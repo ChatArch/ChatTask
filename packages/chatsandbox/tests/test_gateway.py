@@ -131,6 +131,17 @@ def test_runtime_policy_unavailable_does_not_issue_capability(service):
     assert response.status_code==503
 
 
+def test_sdk_eager_egress_discovery_does_not_enable_egress_traffic(service):
+    client,native,evidence,verifier,ledger=service
+    sid=create(client).json()['id']; auth={'OPEN-SANDBOX-API-KEY':'alice-key'}
+    discovered=client.get('/v1/sandboxes/'+sid+'/endpoints/18080',headers=auth)
+    assert discovered.status_code==200 and discovered.json()['headers']=={}
+    assert client.get('/runtime/'+sid+'/18080/policy',headers=auth).status_code==401
+    execd=client.get('/v1/sandboxes/'+sid+'/endpoints/44772',headers=auth).json()
+    assert client.get('/runtime/'+sid+'/18080/policy',headers=execd['headers']).status_code==403
+    assert not any('/18080' in str(r.url) for r in native.requests)
+
+
 def test_uncertain_create_remains_reserved(service):
     client,native,evidence,verifier,ledger=service
     original=native.handle

@@ -97,6 +97,8 @@ The gateway supports this explicit subset of OpenSandbox 1.1.0:
 
 Use both the endpoint and **all returned `Endpoint.headers`** when connecting to execd. The native SDK consumes these headers; custom transports must preserve them. Route capabilities are scoped to the caller, instance and actions, and current Key/grant status is checked on runtime access. Treat those capabilities as credentials and do not log them.
 
+Native ingress signatures and secure headers remain on the gateway. The public capability contains only the caller, instance, actions and deadline; the gateway resolves the native signed route after each authorization check. A reachable internal Kubernetes Service therefore does not provide the native bearer capability. Network policies remain an additional boundary, with Service source NAT considered separately.
+
 Other application ports, arbitrary web hosting, pause/resume, snapshots, mounted volumes, custom extensions/network policy and the full code-interpreter API are outside this initial surface. The gateway strips browser cookies and authentication headers when forwarding guest traffic, rejects redirects and applies a restrictive response policy. SDK compatibility here does not claim that every OpenSandbox feature is enabled.
 
 ## Budgets, lifetime and uncertain operations

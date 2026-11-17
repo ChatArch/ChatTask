@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ChatSandbox"
+version = "0.1.0"
+description = "Shared ChatArch sandbox lifecycle, runtime evidence, and authenticated gateway"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = ["chatstyle>=0.2,<0.3", "chatenv>=0.2.15,<0.3", "click>=8,<9", "opensandbox==1.1.0", "httpx>=0.28,<0.29", "docker>=7,<8"]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.133,<0.143", "uvicorn>=0.41,<0.55", "kubernetes>=31,<36"]
+dev = ["pytest", "build", "twine"]
+
+[project.scripts]
+chatsandbox = "chatsandbox.cli:main"
+
+[project.entry-points."chatenv.configs"]
+chatsandbox = "chatsandbox.config:ChatSandboxConfig"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -23,10 +23,10 @@ class DurableConflict(ValueError):
 _REQUEST = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z")
 _ID = re.compile(r"[a-f0-9]{32}\Z")
 _TASK_PUBLIC = ("id", "owner", "goal", "image_profile", "status", "created_at", "updated_at",
-                "checkpoint", "latest_run_id", "pause_requested", "members", "workflow", "research_project_url")
+                "checkpoint", "latest_run_id", "pause_requested", "members", "workflow", "research_project_url", "package", "review")
 _RUN_PUBLIC = ("id", "task_id", "number", "actor", "instructions", "status", "created_at",
                "updated_at", "session_id", "checkpoint", "result", "error", "artifacts",
-               "cleanup", "credential_closure", "unknown_side_effects", "workflow", "source_records", "research_receipt", "research_outcome_unknown")
+               "cleanup", "credential_closure", "unknown_side_effects", "workflow", "source_records", "research_receipt", "research_outcome_unknown", "package_revision", "package_snapshot", "evaluation", "review", "data_archive", "trajectory", "codex_cli_version", "preparation_receipt", "requested_model")
 
 
 def _fingerprint(value):
@@ -35,13 +35,14 @@ def _fingerprint(value):
 
 class DurableTaskService:
     def __init__(self, store: TaskStore, executor=None, *, image_profiles=None,
-                 research_enabled=False, research_publisher=None, research_origin=''):
+                 research_enabled=False, research_publisher=None, research_origin='', package_verifier=None):
         self.store = store
         self.executor = executor
         self.image_profiles = image_profiles if image_profiles is not None else getattr(executor, "images", {})
         self.research_enabled = research_enabled or research_publisher is not None
         self.research_publisher = research_publisher
         self.research_origin = research_origin.rstrip('/')
+        self.package_verifier = package_verifier if package_verifier is not None else getattr(executor, 'package_verifier', None)
 
     @staticmethod
     def _request(body, allowed):
@@ -77,7 +78,7 @@ class DurableTaskService:
         return {key: run[key] for key in _RUN_PUBLIC if key in run}
 
     def create(self, actor, body, *, _auto_discovery=None):
-        self._request(body, {"request_id", "instructions", "image_profile", "workflow", "source_records"})
+        self._request(body, {"request_id", "instructions", "image_profile", "workflow", "source_records", "definition"})
         instructions = self._instructions(body.get("instructions"))
         image = body.get("image_profile")
         if image not in self.image_profiles:
@@ -96,8 +97,13 @@ class DurableTaskService:
             if 'source_records' in body:
                 raise ValueError('source records require research workflow')
             sources = []
-        fingerprint = _fingerprint({"instructions": instructions, "image_profile": image,
-                                    "workflow": workflow, "source_records": sources})
+        from .task_packages import initial_package, summary, definition_zip, revision_artifact
+        package = initial_package(instructions, self.image_profiles[image], body.get('definition'))
+        fingerprint_input = {"instructions": instructions, "image_profile": image,
+                             "workflow": workflow, "source_records": sources}
+        if body.get('definition') is not None:
+            fingerprint_input['definition'] = package['files']
+        fingerprint = _fingerprint(fingerprint_input)
         with self.store.locked():
             for prior in self.store.list("durable_tasks"):
                 if prior["owner"] == actor and prior["create_request_id"] == body["request_id"]:
@@ -113,6 +119,8 @@ class DurableTaskService:
                     if prior.get('auto_discovery') is not None:
                         raise DurableConflict("request_id input conflict")
                     if prior["create_fingerprint"] != fingerprint:
+                        if body.get('definition') is not None:
+                            raise DurableConflict("request_id input conflict")
                         legacy = _fingerprint({"instructions": instructions, "image_profile": image})
                         if prior.get('workflow', 'development') != 'development' or workflow != 'development' or sources or prior['create_fingerprint'] != legacy:
                             raise DurableConflict("request_id input conflict")
@@ -137,13 +145,18 @@ class DurableTaskService:
                    "workflow": workflow, "source_records": sources,
                    "status": "queued", "created_at": stamp, "updated_at": stamp,
                    "generation": 0, "checkpoint": None, "session_id": None,
+                   "package_revision": package['revision'], "package_snapshot": summary(package),
                    "artifacts": [], "unknown_side_effects": False}
             task = {"id": task_id, "owner": actor, "members": {}, "goal": instructions,
                     "image_profile": image, "workflow": workflow, "status": "queued", "created_at": stamp,
                     "updated_at": stamp, "checkpoint": None, "latest_run_id": run_id,
                     "pause_requested": False, "generation": 0,
                     "create_request_id": body["request_id"], "create_fingerprint": fingerprint,
-                    "controls": {}}
+                    "controls": {}, "package": summary(package),
+                    "package_history": {package['revision']: summary(package)}}
+            archive = definition_zip(package)
+            self.store.put_artifact(task_id, revision_artifact(package['revision']), archive)
+            self.store.put_artifact(task_id, 'task-definition.zip', archive)
             if _auto_discovery is not None:
                 task['auto_discovery'] = _auto_discovery
                 task['auto_initial_run'] = run
@@ -181,6 +194,299 @@ class DurableTaskService:
 
     def get(self, actor, ident):
         return self._public_task(self._raw_task(actor, ident))
+
+    def package(self, actor, ident, revision=None):
+        """Read an immutable task definition; legacy reads never migrate state."""
+        from .task_packages import read_definition_zip, revision_artifact
+        task = self._raw_task(actor, ident)
+        if not task.get('package'):
+            return {'legacy': True, 'revision': None, 'purpose': task['goal'],
+                    'preparation': 'legacy', 'files': {}, 'deliverables': [], 'acceptance': []}
+        revision = revision or task['package']['revision']
+        metadata = task.get('package_history', {}).get(revision)
+        if metadata is None:
+            raise KeyError('task definition revision not found')
+        package = read_definition_zip(self.store.artifact(ident, revision_artifact(revision)))
+        if package['revision'] != revision:
+            raise ValueError('definition digest mismatch')
+        return {**package, **metadata, 'permissions': {
+            'edit': task['owner'] == actor or task.get('members', {}).get(actor) == 'editor',
+            'review': task['owner'] == actor}}
+
+    def revise_package(self, actor, ident, body):
+        from .task_packages import initial_package, summary, definition_zip, revision_artifact
+        self._raw_task(actor, ident, write=True)
+        self._request(body, {'request_id', 'expected_revision', 'definition'})
+        with self.store.locked():
+            task = self._raw_task(actor, ident, write=True)
+            fingerprint = _fingerprint(body)
+            changes = task.setdefault('package_changes', {})
+            if body['request_id'] in changes:
+                saved = changes[body['request_id']]
+                if saved['fingerprint'] != fingerprint:
+                    raise DurableConflict('request_id input conflict')
+                return self.package(actor, ident, saved['revision'])
+            if task.get('package', {}).get('revision') != body.get('expected_revision'):
+                raise DurableConflict('task definition revision changed')
+            if task['status'] in ('queued', 'running', 'reconciling'):
+                raise DurableConflict('cannot revise a queued or executing round; pause queued work before revising for a new round')
+            if len(changes) >= 256:
+                raise ValueError('task definition revision budget reached')
+            package = initial_package(task['goal'], self.image_profiles[task['image_profile']], body.get('definition'))
+            data = definition_zip(package)
+            self.store.put_artifact(ident, revision_artifact(package['revision']), data)
+            self.store.put_artifact(ident, 'task-definition.zip', data)
+            task['package'] = summary(package)
+            task.setdefault('package_history', {})[package['revision']] = summary(package)
+            changes[body['request_id']] = {'fingerprint': fingerprint, 'revision': package['revision']}
+            task.pop('review', None)
+            task['updated_at'] = now()
+            self.store.put('durable_tasks', ident, task)
+            return package
+
+    def export_package(self, actor, ident, revision=None):
+        """Export only the portable definition, never credentials or checkpoints."""
+        from .task_packages import definition_zip
+        package = self.package(actor, ident, revision)
+        if package['legacy']:
+            raise ValueError('legacy task has no authored portable definition')
+        return definition_zip(package)
+
+    def reuse_package(self, actor, ident, body):
+        self._raw_task(actor, ident)
+        self._request(body, {'request_id', 'instructions', 'image_profile'})
+        original = self._raw_task(actor, ident)
+        definition = self.package(actor, ident)
+        if definition['legacy']:
+            raise ValueError('legacy task requires an authored definition before reuse')
+        return self.create(actor, {'request_id': body['request_id'],
+                                  'instructions': body.get('instructions', original['goal']),
+                                  'image_profile': body.get('image_profile', original['image_profile']),
+                                  'definition': definition['files']})
+
+    def evaluations(self, actor, ident, run_id):
+        self._raw_task(actor, ident)
+        run = self.store.get('durable_runs', run_id)
+        if run['task_id'] != ident:
+            raise KeyError('round not found')
+        return [{k: v for k, v in entry.items() if k != 'fingerprint'}
+                for entry in run.get('evaluations', [])]
+
+    def _schedule_evaluation(self, run, actor, request_id, *, automatic=False):
+        history = run.setdefault('evaluations', [])
+        for previous in history:
+            if request_id == previous['request_id'] or request_id in previous.get('request_aliases', []):
+                return previous
+        for previous in history:
+            if previous.get('reconciliation_required'):
+                raise DurableConflict('a prior verifier still needs resource reconciliation')
+            if previous['status'] in ('queued', 'running'):
+                aliases = previous.setdefault('request_aliases', [])
+                if len(aliases) >= 128:
+                    raise ValueError('evaluation request alias budget reached')
+                aliases.append(request_id)
+                return previous
+        if len(history) >= 64:
+            raise ValueError('evaluation budget reached')
+        status = 'queued' if self.package_verifier is not None else 'unavailable'
+        if automatic and run['status'] != 'completed':
+            status = 'not_run'
+        elif status == 'queued' and run.get('package_snapshot', {}).get('acceptance') and all(
+                c['method'] == 'human' for c in run['package_snapshot']['acceptance']):
+            status = 'pending_review'
+        record = {'id': uuid.uuid4().hex, 'request_id': request_id, 'run_id': run['id'],
+                  'revision': run['package_revision'], 'actor': actor, 'status': status,
+                  'created_at': now(), 'automatic': automatic,
+                  'inputs': [{k: item[k] for k in ('name', 'size', 'sha256')}
+                             for item in run.get('artifacts', [])
+                             if item['name'] not in ('checkpoint.tar.gz', 'task-data.zip', 'task-definition.zip')]}
+        if status == 'unavailable':
+            record.update(error='No isolated package verifier is configured', finished_at=now())
+        elif status == 'not_run':
+            record.update(error='Execution did not complete; no automatic passing score is inferred', finished_at=now())
+        elif status == 'pending_review':
+            record.update(reason='This definition requests explicit human acceptance', finished_at=now())
+        history.append(record)
+        run['evaluation'] = record
+        return record
+
+    async def evaluate_package(self, actor, ident, run_id, body):
+        """Persist a verification request; only the independent worker executes it."""
+        self._raw_task(actor, ident, write=True)
+        self._request(body, {'request_id'})
+        with self.store.locked():
+            self._raw_task(actor, ident, write=True)
+            run = self.store.get('durable_runs', run_id)
+            if run['task_id'] != ident:
+                raise KeyError('round not found')
+            if run['status'] not in ('completed', 'blocked', 'interrupted') or not run.get('package_revision'):
+                raise DurableConflict('evaluation requires a terminal packaged round')
+            record = self._schedule_evaluation(run, actor, body['request_id'])
+            self._seal_run_data(run)
+            self.store.put('durable_runs', run_id, run)
+            return record
+
+    async def _evaluation_once(self):
+        if self.package_verifier is None:
+            return None
+        # A running record at a new worker boundary belongs to an interrupted
+        # attempt. Never replay it or invent a reward after losing its result.
+        for old in self.store.list('durable_runs'):
+            for candidate in old.get('evaluations', []):
+                if candidate['status'] != 'running' and not candidate.get('reconciliation_required'):
+                    continue
+                reconcile = getattr(self.package_verifier, 'reconcile', None)
+                absent = bool(reconcile and await reconcile(candidate))
+                with self.store.locked():
+                    fresh = self.store.get('durable_runs', old['id'])
+                    entry = next(e for e in fresh['evaluations'] if e['id'] == candidate['id'])
+                    entry.update(status='interrupted', error='VerifierWorkerExited',
+                                 reconciliation_required=not absent, finished_at=now())
+                    if fresh.get('evaluation', {}).get('id') == entry['id']:
+                        fresh['evaluation'] = entry
+                    self._seal_run_data(fresh)
+                    self.store.put('durable_runs', fresh['id'], fresh)
+        with self.store.locked():
+            queue = [(e['created_at'], r, e) for r in self.store.list('durable_runs')
+                     for e in r.get('evaluations', []) if e['status'] == 'queued']
+            if not queue:
+                return None
+            _, run, evaluation = min(queue, key=lambda item: (item[0], item[2]['id']))
+            if any(e.get('reconciliation_required') for e in run['evaluations']):
+                return None
+            task = self.store.get('durable_tasks', run['task_id'])
+            actor = evaluation['actor']
+            if actor != task['owner'] and task.get('members', {}).get(actor) != 'editor':
+                evaluation.update(status='unavailable', error='Evaluation permission was revoked', finished_at=now())
+                self._seal_run_data(run)
+                self.store.put('durable_runs', run['id'], run)
+                return evaluation
+            evaluation.update(status='running', started_at=now())
+            run['evaluation'] = evaluation
+            self.store.put('durable_runs', run['id'], run)
+        from .task_packages import validate_reward, read_definition_zip
+        try:
+            package = read_definition_zip(self.store.artifact(run['id'], 'task-definition.zip'))
+            if package['revision'] != evaluation['revision']:
+                raise ValueError('round definition digest mismatch')
+            inputs = []
+            for entry in evaluation['inputs']:
+                data = self.store.artifact(run['id'], entry['name'])
+                if len(data) != entry['size'] or hashlib.sha256(data).hexdigest() != entry['sha256']:
+                    raise ValueError('evaluation input digest mismatch')
+                inputs.append({**entry, 'data': data})
+            checked = await self.package_verifier.evaluate(package, inputs, task=task, run=run)
+            if checked.get('status') in ('unavailable', 'error'):
+                outcome = {k: checked[k] for k in ('status', 'error', 'diagnostic', 'cleanup', 'reconciliation_required') if k in checked}
+            else:
+                cleanup = checked.get('cleanup', {})
+                if cleanup.get('container_absent') is not True or cleanup.get('credential_closed') is not True:
+                    raise RuntimeError('verifier closure is unconfirmed')
+                reward = validate_reward(checked['reward'])
+                criteria = checked.get('criteria', {})
+                required = [c for c in package['acceptance'] if c.get('required', True)]
+                automated = [c for c in required if c['method'] != 'human']
+                failed = any(criteria.get(c['id'], {}).get('passed') is False for c in automated)
+                missing = any(type(criteria.get(c['id'], {}).get('passed')) is not bool for c in automated)
+                pending_review = any(c['method'] == 'human' for c in required)
+                status = ('failed' if failed else 'needs_evidence' if missing else
+                          'pending_review' if pending_review else 'passed' if required else 'needs_evidence')
+                outcome = {'status': status, 'reward': reward, 'details': checked.get('details', {}),
+                           'criteria': criteria, 'verifier': checked.get('verifier', {}), 'cleanup': cleanup}
+        except Exception as exc:
+            outcome = {'status': 'error', 'error': type(exc).__name__, 'reconciliation_required': True}
+        with self.store.locked():
+            current = self.store.get('durable_runs', run['id'])
+            saved = next(e for e in current['evaluations'] if e['id'] == evaluation['id'])
+            if saved['status'] != 'running':
+                raise DurableConflict('evaluation ownership changed')
+            saved.update(outcome, finished_at=now())
+            current['evaluation'] = saved
+            self._seal_run_data(current)
+            self.store.put('durable_runs', run['id'], current)
+            return saved
+
+    def _seal_run_data(self, run):
+        """Caller owns the store lock; archive failure never rewrites execution success."""
+        if not run.get('package_revision'):
+            return
+        from .task_packages import run_archive
+        if any(a['name'] == 'codex.events.jsonl' for a in run.get('artifacts', [])):
+            try:
+                from .task_trajectories import codex_to_atif
+                events = self.store.artifact(run['id'], 'codex.events.jsonl').decode('utf-8', errors='replace')
+                trajectory = codex_to_atif(events, run['instructions'],
+                                           model=run.get('requested_model'),
+                                           version=run.get('codex_cli_version'))
+                data = json.dumps(trajectory, ensure_ascii=False, sort_keys=True).encode()
+                entry = {'name': 'trajectory.json', 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+                self.store.put_artifact(run['id'], entry['name'], data)
+                run['artifacts'] = [a for a in run['artifacts'] if a['name'] != entry['name']] + [entry]
+                run['trajectory'] = {'status': 'ready', **entry, 'coverage': 'observable-exec-events'}
+            except Exception as exc:
+                run['trajectory'] = {'status': 'error', 'error': type(exc).__name__}
+        try:
+            data = run_archive(self.store, run)
+            self.store.put_artifact(run['id'], 'task-data.zip', data)
+            run['data_archive'] = {'status': 'ready', 'name': 'task-data.zip',
+                                   'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
+                                   'definition_revision': run['package_revision'], 'sealed_at': now()}
+        except Exception as exc:
+            run['data_archive'] = {'status': 'error', 'error': type(exc).__name__}
+
+    def review_package(self, actor, ident, body):
+        """Record an explicit owner decision against one exact round and definition."""
+        task = self._raw_task(actor, ident, write=True)
+        if task['owner'] != actor:
+            raise KeyError('task not found')
+        self._request(body, {'request_id', 'expected_revision', 'run_id', 'decision', 'notes', 'criteria'})
+        if body.get('decision') not in ('accepted', 'changes_requested'):
+            raise ValueError('invalid review decision')
+        notes = self._instructions(body.get('notes'))
+        with self.store.locked():
+            task = self._raw_task(actor, ident, write=True)
+            if not task.get('package'):
+                raise DurableConflict('review requires a packaged round')
+            if body.get('run_id') != task['latest_run_id']:
+                raise DurableConflict('review must identify the latest round')
+            run = self.store.get('durable_runs', body['run_id'])
+            if run['task_id'] != ident or run.get('package_revision') != body['expected_revision']:
+                raise DurableConflict('review round definition mismatch')
+            if run['status'] not in ('completed', 'blocked', 'interrupted'):
+                raise DurableConflict('round is not terminal')
+            from .task_packages import read_definition_zip
+            definition = read_definition_zip(self.store.artifact(run['id'], 'task-definition.zip'))
+            if definition['revision'] != run['package_revision']:
+                raise DurableConflict('review frozen definition integrity mismatch')
+            criteria = body.get('criteria', {})
+            expected = {c['id'] for c in definition['acceptance']}
+            if not isinstance(criteria, dict) or set(criteria) - expected or any(type(v) is not bool for v in criteria.values()):
+                raise ValueError('invalid review criterion decisions')
+            if body['decision'] == 'accepted':
+                required = {c['id'] for c in definition['acceptance'] if c.get('required', True)}
+                if run['status'] != 'completed' or any(criteria.get(c) is not True for c in required):
+                    raise ValueError('acceptance requires completed execution and explicit required-criterion decisions')
+            history = run.setdefault('review_history', [])
+            fingerprint = _fingerprint(body)
+            for review in history:
+                if review['request_id'] == body['request_id']:
+                    if review['fingerprint'] != fingerprint:
+                        raise DurableConflict('request_id input conflict')
+                    return {k: v for k, v in review.items() if k != 'fingerprint'}
+            if len(history) >= 256:
+                raise ValueError('review history budget reached')
+            review = {'id': uuid.uuid4().hex, 'request_id': body['request_id'], 'run_id': run['id'],
+                      'revision': body['expected_revision'], 'reviewer': actor,
+                      'decision': body['decision'], 'criteria': criteria, 'notes': notes,
+                      'created_at': now(), 'fingerprint': fingerprint}
+            history.append(review)
+            public = {k: v for k, v in review.items() if k != 'fingerprint'}
+            run['review'] = public
+            task['review'] = public
+            self._seal_run_data(run)
+            self.store.put('durable_runs', run['id'], run)
+            self.store.put('durable_tasks', ident, task)
+            return public
 
     def list(self, actor):
         tasks = [self._public_task(t) for t in self.store.list("durable_tasks")
@@ -258,6 +564,9 @@ class DurableTaskService:
                        "status": "queued", "created_at": stamp, "updated_at": stamp,
                        "generation": 0, "checkpoint": None, "session_id": task["checkpoint"]["session_id"] if task["checkpoint"] else None,
                        "artifacts": [], "unknown_side_effects": False}
+                if task.get('package'):
+                    run.update(package_revision=task['package']['revision'], package_snapshot=task['package'],
+                               evaluation={'status':'pending','reason':'Execution does not imply verification'})
                 self.store.put("durable_runs", run_id, run)
                 task.update(latest_run_id=run_id, status="queued", pause_requested=False)
             elif action == "pause":
@@ -571,6 +880,9 @@ class DurableTaskService:
                 break
         if reconcile_claim:
             return await self._reconcile_research_run(*reconcile_claim)
+        evaluated = await self._evaluation_once()
+        if evaluated is not None:
+            return evaluated
         with self.store.locked():
             queued = sorted((r for r in self.store.list("durable_runs") if r["status"] == "queued"), key=lambda r: r["created_at"])
             eligible = []
@@ -588,6 +900,15 @@ class DurableTaskService:
             generation = task["generation"]
             task.update(status="running", updated_at=now())
             run.update(status="running", generation=generation, updated_at=now())
+            if task.get('package'):
+                from .task_packages import revision_artifact
+                revision = run.get('package_revision', task['package']['revision'])
+                self.store.put_artifact(run['id'], 'task-definition.zip',
+                                        self.store.artifact(task['id'], revision_artifact(revision)))
+                run['package_revision'] = revision
+                run['package_snapshot'] = run.get('package_snapshot', task['package'])
+                run['evaluation'] = {'status': 'pending', 'reason': 'Execution does not imply independent verification'}
+                task.pop('review', None)
             self.store.put("durable_tasks", task["id"], task)
             self.store.put("durable_runs", run["id"], run)
         checkpoint = None
@@ -625,8 +946,46 @@ class DurableTaskService:
                 self.store.put("durable_runs", run["id"], current_run)
                 self.store.put("durable_tasks", task["id"], current)
 
+        async def prepare_definition(files):
+            from .task_packages import initial_package, summary, definition_zip, revision_artifact
+            if not isinstance(files, dict):
+                raise ValueError('agent preparation requires a definition file mapping')
+            prepared = initial_package(task['goal'], self.image_profiles[task['image_profile']], files)
+            prepared['preparation'] = 'agent_generated'
+            prepared['initial_request_sha256'] = hashlib.sha256(task['goal'].encode()).hexdigest()
+            data = definition_zip(prepared)
+            with self.store.locked():
+                current = self.store.get('durable_tasks', task['id'])
+                current_run = self.store.get('durable_runs', run['id'])
+                if current['generation'] != generation or current_run['generation'] != generation or current_run['status'] != 'running':
+                    raise DurableConflict('stale package preparation')
+                if current.get('package', {}).get('preparation') != 'pending':
+                    if current_run.get('package_revision') == prepared['revision']:
+                        return prepared
+                    raise DurableConflict('task definition was already prepared')
+                self.store.put_artifact(task['id'], revision_artifact(prepared['revision']), data)
+                self.store.put_artifact(task['id'], 'task-definition.zip', data)
+                self.store.put_artifact(run['id'], 'task-definition.zip', data)
+                current['package'] = summary(prepared)
+                current.setdefault('package_history', {})[prepared['revision']] = summary(prepared)
+                current_run['package_revision'] = prepared['revision']
+                current_run['package_snapshot'] = summary(prepared)
+                current_run['phase'] = 'package_prepared'
+                if current_run['number'] == 1:
+                    current['initial_run'] = current_run
+                # Root intent is durable before the solver is allowed to proceed.
+                self.store.put('durable_tasks', task['id'], current)
+                self.store.put('durable_runs', run['id'], current_run)
+                task['package'] = summary(prepared)
+            return prepared
+
         pre_execution_error = None
         try:
+            if task.get('package'):
+                package = self.package(task['owner'], task['id'], run['package_revision'])
+                task['_definition_files'] = package['files']
+                if package['preparation'] == 'pending':
+                    task['_prepare_definition'] = prepare_definition
             if task.get("checkpoint"):
                 ref = task["checkpoint"]
                 checkpoint = self.store.artifact(ref["run_id"], "checkpoint.tar.gz")
@@ -647,6 +1006,7 @@ class DurableTaskService:
                                     research_outcome_unknown=False,
                                     reconciliation_required=False, updated_at=now())
                 current.update(status="blocked", pause_requested=False, updated_at=now())
+                self._seal_run_data(current_run)
                 self.store.put("durable_runs", run["id"], current_run)
                 self.store.put("durable_tasks", task["id"], current)
                 return self._public_run(current_run)
@@ -730,6 +1090,14 @@ class DurableTaskService:
                                or not (result.get('credential_closure', {}).get('closed', False)
                                        or result.get('credential_closure', {}).get('not_created', False)),
                                updated_at=now())
+            if result.get('codex_cli_version'):
+                current_run['codex_cli_version'] = result['codex_cli_version']
+            if result.get('preparation_receipt'):
+                current_run['preparation_receipt'] = result['preparation_receipt']
+            if result.get('requested_model'):
+                current_run['requested_model'] = result['requested_model']
+            if result.get('diagnostic'):
+                current_run['diagnostic'] = result['diagnostic']
             if research_receipt is not None:
                 current_run['research_receipt'] = research_receipt
                 current['research_root_doc_id'] = research_receipt['root_doc_id']
@@ -737,6 +1105,9 @@ class DurableTaskService:
             current["status"] = "paused" if success and current["pause_requested"] else "waiting_input" if success else "blocked"
             current["pause_requested"] = False
             current["updated_at"] = now()
+            if current_run.get('package_revision') and not current_run.get('evaluations'):
+                self._schedule_evaluation(current_run, current['owner'], 'auto-' + current_run['id'], automatic=True)
+            self._seal_run_data(current_run)
             self.store.put("durable_runs", run["id"], current_run)
             self.store.put("durable_tasks", task["id"], current)
             return self._public_run(current_run)

@@ -94,12 +94,13 @@ def policy(spec, *, sources=None, artifact_digests=None):
     return result
 
 def prepare_instructions(spec):
+    from .task_templates import RELEASE_SKILL
     serial=json.dumps(spec,sort_keys=True,ensure_ascii=False,separators=(',',':'))
     branches=(['main','release/'+spec['version']] if spec['mode']=='new' else ['release/'+spec['version']])
     return (
-        'PREPARE ONLY. Use /workspace/task_tools.py /tools/catalog and only read-only scoped routes. '
+        RELEASE_SKILL+'\n\nPREPARE ONLY. Use /workspace/task_tools.py /tools/catalog and only read-only scoped routes. '
         'No repository, registry, publisher, PR, tag or release mutation. Exact canonical spec: '+serial+'. '
-        'Inspect live package/registry/publisher/repository/status facts. Refuse name/version collisions or unclear outcomes. '
+        'Inspect live package/registry/repository/status facts. For existing unchanged publishing identities, reuse the established OIDC Publisher; do not repeat PyPI login or Publisher management without an actual identity change, explicit request or publishing failure. Refuse name/version collisions or unclear outcomes. '
         'Existing mode: fetch exact main snapshot via /github/api/repo/snapshot; never recreate project or placeholder. '
         'New mode: build standard Python package skeleton with private repository intent, MIT or selected license, '
         'bilingual MkDocs if selected, standard CI and OIDC publish workflow. Do not infer business behavior from the name; '

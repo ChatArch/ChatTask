@@ -6,15 +6,16 @@
 
 ```text
 登录网页 → ChatTask 模板/私有运行记录 → ChatPyPI 元数据工具
-                                  └→ OpenSandbox → 跟踪源码测试、构建、检查
+                                  └→ ChatSandbox → OpenSandbox运行后端 → 跟踪源码测试、构建、检查
 明确批准 → ChatGH/GitHub 已合并 PR 与检查 → 标签 → 既有 OIDC 发布工作流
 ```
 
-准备现有 OpenSandbox 控制面与 Docker、固定站点账号、发布版 ChatPyPI 服务、原生 ChatAuth 访问令牌，以及已有 PyPI ChatEnv 命名 profile。安装、服务部署、令牌签发与更新属于运行方，不由 ChatTask 自动完成。单个 Sandbox 仍受 600 秒底层 TTL、1 CPU、512 MiB、PIDs 128、回环端口和零宿主挂载约束；项目构建/测试代码只在其中执行。
+准备原 OpenSandbox Docker 连接或显式ChatSandbox命名profile、固定站点账号、发布版ChatPyPI服务、原生ChatAuth访问令牌，以及已有PyPI ChatEnv命名profile。安装、服务部署、令牌签发与更新属于运行方，不由ChatTask自动完成。默认模板使用600秒TTL，既有Docker策略保持1 CPU、512 MiB、PIDs128、回环端口和零宿主挂载；远程后端提供对应的受保护运行证据。项目构建/测试代码只在所选Sandbox中执行。配置迁移与独立发行包先后顺序见[公共后端](sandbox-backends.md)。
 
 ## 安装候选和设置
 
 ```bash
+python -m pip install -e ./packages/chatsandbox
 python -m pip install -e '.[web]'
 chattask --tree
 chattask paths --json-output

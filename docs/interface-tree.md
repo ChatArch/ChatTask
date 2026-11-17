@@ -8,7 +8,10 @@ CLI 和 Web 复用可导入的业务层；导入 `chattask` 本身不连接 Dock
 ```text
 chattask
 ├── TaskSettings / settings.load_settings(profile=..., home=...)
-├── TaskService                    # 旧整数 Task 与持续 Shell
+├── TaskService(settings, backend=...) # Task编排；运行能力委托ChatSandbox
+│   ├── for_image(image) / connection() / connect(id, connection)
+│   ├── create(ttl_seconds=600, durable_run_id=None) / inspect_owned(id)
+│   ├── find_run_sandboxes(run_id) / verify_absent(id) / dispose(sandbox, connection)
 │   ├── once(values)
 │   ├── open_session() / run_session(id, command) / close_session(id)
 │   └── sweep() / shutdown()
@@ -37,3 +40,5 @@ chattask
 `approve` 只接受运行处于 `awaiting_approval` 时的精确字典：`action=tag`、同一 `repository_id`、`version`、`source_sha`、`source_tree`、`confirmation=TAG owner/repo vVERSION`。后端要求已合并 PR 的源码树等于预检树、精确 `test` CI/CI工作流通过，并要求合版树仍等于预检树。结果可能是 `blocked`、`release_unknown` 或 `awaiting_publication`，后者不代表包已发布。产物下载会再次核对字节大小和 SHA256。
 
 Web lifespan负责恢复标记和显式关闭。直接使用 Python 长期会话或工作流的调用方也应管理这两个方法。所有生产依赖连接在显式构造/调用后才发生；源码离线测试使用注入的合成客户端与临时存储。
+
+`CHATTASK_SANDBOX_PROFILE`引用ChatSandbox连接配置，且与旧endpoint/key互斥。公共后端与发布依赖顺序见[公共Sandbox后端](sandbox-backends.md)；旧`docker_client`参数只用于legacy Docker，远程provider不触碰本机Docker。

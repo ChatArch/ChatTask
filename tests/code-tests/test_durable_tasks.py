@@ -316,6 +316,7 @@ def test_executor_reads_complete_bounded_guest_help_for_native_resume(root_help,
 
     class Service:
         docker = SimpleNamespace(containers=SimpleNamespace(list=lambda **_: []))
+        def verify_absent(self, sandbox_id): return True
         output = staticmethod(TaskService.output)
 
         async def create(self, **kwargs):
@@ -330,7 +331,7 @@ def test_executor_reads_complete_bounded_guest_help_for_native_resume(root_help,
     runtime = CodexRuntime("http://127.0.0.1:8001/v1", "synthetic-token", images={"python": "synthetic-image"})
 
     async def run():
-        with patch("chattask.codex_tasks.TaskService", return_value=Service()), \
+        with patch.object(parent, "for_image", create=True, return_value=Service()), \
              patch("chattask.durable_archive.validate_checkpoint"):
             return await CodexTaskExecutor(parent, runtime).execute_durable(
                 {"goal": "synthetic", "image_profile": "python", "checkpoint": {"synthetic": True}},
@@ -352,6 +353,7 @@ def test_sandbox_identity_receipt_is_reported_before_command_failure():
 
     class Service:
         docker = SimpleNamespace(containers=SimpleNamespace(list=lambda **_: []))
+        def verify_absent(self, sandbox_id): return True
 
         async def create(self, **kwargs):
             return sandbox, None, receipt
@@ -372,7 +374,7 @@ def test_sandbox_identity_receipt_is_reported_before_command_failure():
         async def save(*args):
             raise AssertionError('checkpoint must not be reached')
 
-        with patch('chattask.codex_tasks.TaskService', return_value=Service()):
+        with patch.object(parent, 'for_image', create=True, return_value=Service()):
             await CodexTaskExecutor(parent, runtime).execute_durable(
                 {'goal': 'demo', 'image_profile': 'python'},
                 {'id': 'a' * 32, 'instructions': 'demo', 'workflow': 'development', 'session_id': None},

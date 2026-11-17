@@ -1,5 +1,7 @@
 # Capability map
 
+Generic Sandbox connections, provider evidence and cleanup use the independently packaged ChatSandbox component. Task retains business workflows, history and artifacts. Existing Docker settings and explicit remote named profiles are supported; real deployment remains separate acceptance. See [shared backends](sandbox-backends.en.md).
+
 | Capability | Implementation | Boundary |
 |---|---|---|
 | Templates and repositories | Built-in Python release template, declarative custom revisions, trusted Git roots registered by CLI | Browser cannot submit paths, URLs or host commands; dirty source and tracked private configuration are rejected |

@@ -14,7 +14,6 @@ import tarfile
 import uuid
 from urllib.parse import urlsplit
 from opensandbox.models.execd import RunCommandOpts
-from .service import TaskService
 
 @dataclass(frozen=True)
 class CodexRuntime:
@@ -131,9 +130,7 @@ class CodexTaskExecutor:
             elif not sandbox_id or not isinstance(receipt,dict):
                 return False
             if sandbox_id:
-                matched=[container for container in self.task_service.docker.containers.list(all=True)
-                         if container.name=='sandbox-'+sandbox_id]
-                if matched:return False
+                if not self.task_service.verify_absent(sandbox_id):return False
             if self.gateway:
                 closed=await asyncio.to_thread(self.gateway.close,run['id'])
                 if closed!={'closed':True}:
@@ -172,7 +169,7 @@ class CodexTaskExecutor:
                     else:
                         runtime=replace(runtime,base_url=lease.model_base_url,access_token=lease.model_access_token,
                                         tool_base_url=lease.tool_base_url,tool_access_token=lease.tool_access_token)
-                service=TaskService(replace(self.task_service.settings,image=self.images[task['image_profile']]),docker_client=self.task_service.docker)
+                service=self.task_service.for_image(self.images[task['image_profile']])
                 await update({'index':0,'status':'running'})
                 if durable:await update({'phase':'sandbox_intent'})
                 create_options={'ttl_seconds':(120 if mode=='verify' else runtime.seconds)+(hook[1] if hook else 0)+120}
@@ -341,7 +338,7 @@ class CodexTaskExecutor:
                 if sandbox is not None:
                     try:
                         await service.dispose(sandbox,cfg)
-                        outcome['cleanup']={'requested':True,'container_absent':not any(c.name=='sandbox-'+sandbox.id for c in service.docker.containers.list(all=True))}
+                        outcome['cleanup']={'requested':True,'container_absent':service.verify_absent(sandbox.id)}
                     except Exception:outcome['cleanup']={'requested':True,'container_absent':False}
                     if not outcome['cleanup']['container_absent']:outcome['ok']=False
                 if lease is not None or gateway_intent:

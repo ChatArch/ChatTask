@@ -189,6 +189,7 @@ class SandboxExecutorTests(unittest.TestCase):
         class Service:
             lock = asyncio.Lock()
             docker = SimpleNamespace(containers=SimpleNamespace(list=lambda **_: []))
+            def verify_absent(self, sandbox_id): return True
             async def create(self): return sandbox, object(), {'mount_count': 0}
             async def dispose(self, sandbox, cfg): self.disposed = True
             @staticmethod

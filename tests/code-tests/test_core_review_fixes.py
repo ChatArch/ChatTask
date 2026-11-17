@@ -173,29 +173,24 @@ def test_reconcile_intent_without_sandbox_id_uses_run_owned_readback(monkeypatch
     assert gateway.closed == [run['id']]
 
 
-def test_sandbox_creation_carries_run_identity_and_controller_inventory_is_checked(monkeypatch):
+def test_sandbox_creation_and_recovery_preserve_run_identity_for_shared_backend():
     run_id = 'b' * 32
-    service = TaskService(TaskSettings('http://127.0.0.1:1234','synthetic'), docker_client=SimpleNamespace())
     sandbox = SimpleNamespace(id='synthetic-id')
-    class Manager:
-        async def list_sandbox_infos(self, filter):
-            assert filter.page == 1
-            return SimpleNamespace(sandbox_infos=[SimpleNamespace(id='synthetic-id', metadata={'purpose':'chattask','durable_run_id':run_id})],
-                                   pagination=SimpleNamespace(page=1,total_items=1,has_next_page=False))
-        async def close(self): pass
-    async def make_sandbox(*args, **kwargs):
-        assert kwargs['metadata'] == {'purpose':'chattask','durable_run_id':run_id}
-        return sandbox
-    async def make_manager(*args, **kwargs): return Manager()
-    monkeypatch.setattr(service, 'inspect_owned', lambda _: {'container_id':'synthetic'})
-    with patch('chattask.service.Sandbox.create', side_effect=make_sandbox), \
-         patch('chattask.service.SandboxManager.create', side_effect=make_manager):
-        async def run():
-            created, cfg, _ = await service.create(durable_run_id=run_id)
-            assert created is sandbox
-            await cfg.transport.aclose()
-            assert await service.find_run_sandboxes(run_id) == ['synthetic-id']
-        asyncio.run(run())
+    class Backend:
+        async def create(self, *, ttl_seconds, metadata):
+            assert ttl_seconds == 600
+            assert metadata == {'purpose':'chattask','durable_run_id':run_id}
+            return sandbox, None, {'provider':'kubernetes','sandbox_id':sandbox.id}
+        async def find_owned(self, metadata):
+            assert metadata == {'purpose':'chattask','durable_run_id':run_id}
+            return ['synthetic-id']
+    service = TaskService(TaskSettings('http://127.0.0.1:1234','synthetic'), backend=Backend())
+    async def run():
+        created, _, evidence = await service.create(durable_run_id=run_id)
+        assert created is sandbox
+        assert evidence['provider'] == 'kubernetes'
+        assert await service.find_run_sandboxes(run_id) == ['synthetic-id']
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize('failure_point', ['create', 'callback'])
@@ -219,7 +214,7 @@ def test_gateway_lease_closes_before_or_after_sandbox_receipt_failure(monkeypatc
         async def dispose(self, *args): self.disposed = True
     fake, gateway = Service(), Gateway()
     docker = SimpleNamespace(containers=SimpleNamespace(list=lambda **_: []))
-    fake.docker = docker
+    fake.verify_absent = lambda sandbox_id: True
     parent = SimpleNamespace(lock=asyncio.Lock(), settings=TaskSettings('http://127.0.0.1:1234','synthetic'), docker=docker)
     executor = CodexTaskExecutor(parent, CodexRuntime('http://127.0.0.1:8001/v1','synthetic-token',images={'python':'synthetic'}), gateway=gateway)
     phases = []
@@ -228,7 +223,7 @@ def test_gateway_lease_closes_before_or_after_sandbox_receipt_failure(monkeypatc
             phases.append(step['phase'])
             if failure_point == 'callback' and step['phase'] == 'sandbox_created':
                 raise RuntimeError('synthetic callback failed')
-    with patch('chattask.codex_tasks.TaskService', return_value=fake):
+    with patch.object(parent, 'for_image', create=True, return_value=fake):
         result = asyncio.run(executor.execute_durable({'goal':'synthetic','image_profile':'python'},
                              {'id':'a'*32,'instructions':'synthetic','workflow':'development','session_id':None},
                              None, lambda *args: None, progress))
@@ -483,7 +478,7 @@ def test_executor_sandbox_intent_write_failure_without_gateway_reports_no_resour
         if step.get('phase') == 'sandbox_intent': raise OSError('synthetic state write failed')
     class Service:
         async def create(self, **kwargs): raise AssertionError('must not create Sandbox')
-    with patch('chattask.codex_tasks.TaskService', return_value=Service()):
+    with patch.object(parent, 'for_image', create=True, return_value=Service()):
         result = asyncio.run(executor.execute_durable({'goal':'synthetic','image_profile':'python'},
                              {'id':'a'*32,'instructions':'synthetic','workflow':'development','session_id':None},
                              None, lambda *args: None, fail_progress))
@@ -738,7 +733,7 @@ def test_static_endpoint_lost_sandbox_reply_fences_until_run_inventory_absent(tm
         def __init__(self):
             self.lock = asyncio.Lock()
             self.settings = TaskSettings('http://127.0.0.1:1234', 'synthetic')
-            self.docker = SimpleNamespace(containers=SimpleNamespace(list=lambda **_: []))
+            self.verify_absent = lambda sandbox_id: True
             self.found = []
         async def find_run_sandboxes(self, run_id): return self.found
     parent = Parent()
@@ -762,7 +757,7 @@ def test_static_endpoint_lost_sandbox_reply_fences_until_run_inventory_absent(tm
     executor = Executor()
     svc = DurableTaskService(TaskStore(tmp_path/'state'), executor)
     first, second = created_like(svc, 'lost-reply'), created_like(svc, 'next-run')
-    with patch('chattask.codex_tasks.TaskService', return_value=LostReplyService()):
+    with patch.object(parent, 'for_image', create=True, return_value=LostReplyService()):
         with executor_lock(svc.store): blocked = asyncio.run(svc.worker_once())
     raw = svc.store.get('durable_runs', first['latest_run_id'])
     assert blocked['status'] == 'blocked'
@@ -799,7 +794,7 @@ def test_static_endpoint_precreate_progress_failure_does_not_fence_next_run(tmp_
     class NoCreate:
         async def create(self, **kwargs): pytest.fail('Sandbox creation must not be attempted')
     svc.store.put = fail_intent
-    with patch('chattask.codex_tasks.TaskService', return_value=NoCreate()):
+    with patch.object(parent, 'for_image', create=True, return_value=NoCreate()):
         with executor_lock(svc.store): asyncio.run(svc.worker_once())
     svc.store.put = original
     raw = svc.store.get('durable_runs', first['latest_run_id'])

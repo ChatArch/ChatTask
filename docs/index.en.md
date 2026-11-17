@@ -6,15 +6,16 @@ These template capabilities start in ChatTask 0.1.0; historical PyPI 0.0.2 is on
 
 ```text
 Authenticated Web → ChatTask templates/private runs → ChatPyPI metadata tool
-                                           └→ OpenSandbox → tracked-source test/build/check
+                                           └→ ChatSandbox → OpenSandbox runtime → tracked-source test/build/check
 Exact approval → ChatGH/GitHub merged PR and checks → tag → existing OIDC publish workflow
 ```
 
-Provide an existing OpenSandbox control plane and Docker access, a fixed site account, a published ChatPyPI service, a native ChatAuth access token and an existing PyPI ChatEnv named profile. The operator owns installation, deployment, token issue and renewal. ChatTask does not provision them. Each Sandbox remains bounded by the 600-second backend TTL, 1 CPU, 512 MiB, 128 PIDs, loopback ports and no host mounts. Project build/test code runs only inside it.
+Provide the legacy OpenSandbox Docker connection or an explicit ChatSandbox named profile, a fixed site account, a published ChatPyPI service, a native ChatAuth access token and an existing PyPI ChatEnv named profile. The operator owns installation, deployment, token issue and renewal. The default template uses a 600-second TTL; legacy Docker policy retains 1 CPU, 512 MiB, 128 PIDs, loopback ports and no host mounts. Remote providers supply corresponding protected runtime evidence. Project build/test code runs only inside the selected Sandbox. See [shared backends](sandbox-backends.en.md) for migration and independent package release order.
 
 ## Candidate setup
 
 ```bash
+python -m pip install -e ./packages/chatsandbox
 python -m pip install -e '.[web]'
 chattask --tree
 chattask paths --json-output

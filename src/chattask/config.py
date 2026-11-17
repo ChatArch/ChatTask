@@ -6,8 +6,9 @@ class ChatTaskConfig(BaseEnvConfig):
     _aliases = ['chattask', 'task']
     _storage_dir = 'ChatTask'
 
-    CHATTASK_SANDBOX_ENDPOINT = EnvField('CHATTASK_SANDBOX_ENDPOINT', desc='Trusted OpenSandbox control-plane HTTP(S) origin.')
-    CHATTASK_SANDBOX_API_KEY = EnvField('CHATTASK_SANDBOX_API_KEY', desc='OpenSandbox control-plane API key.', is_sensitive=True)
+    CHATTASK_SANDBOX_PROFILE = EnvField('CHATTASK_SANDBOX_PROFILE', desc='Optional existing ChatSandbox named profile; owns its provider and connection. Mutually exclusive with legacy endpoint/key.')
+    CHATTASK_SANDBOX_ENDPOINT = EnvField('CHATTASK_SANDBOX_ENDPOINT', desc='Trusted legacy OpenSandbox control-plane HTTP(S) origin; empty when using a ChatSandbox profile.')
+    CHATTASK_SANDBOX_API_KEY = EnvField('CHATTASK_SANDBOX_API_KEY', desc='Legacy OpenSandbox control-plane key; empty when using a ChatSandbox profile.', is_sensitive=True)
     CHATTASK_TOOL_PROFILE = EnvField('CHATTASK_TOOL_PROFILE', default='task-tools', desc='Name of an existing PyPI ChatEnv connection profile; no service URL or token is stored here.')
     CHATTASK_PUBLIC_DEPS_PATH = EnvField('CHATTASK_PUBLIC_DEPS_PATH', desc='Optional trusted public Python dependency archive for offline Sandbox tests/builds.')
     CHATTASK_PUBLIC_DEPS_SHA256 = EnvField('CHATTASK_PUBLIC_DEPS_SHA256', desc='Required SHA256 digest of the trusted dependency archive.')

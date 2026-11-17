@@ -1,5 +1,7 @@
 # 能力地图
 
+Sandbox连接、provider运行证据和回收复用独立ChatSandbox包；Task保留业务任务、历史与产物。支持原Docker连接和显式远程命名profile，部署验收另行完成，见[公共后端](sandbox-backends.md)。
+
 | 能力 | 当前实现 | 边界 |
 |---|---|---|
 | 模板与仓库 | 内置 Python 发布模板、自定义声明式修订、CLI 登记受信 Git 根 | 网页不能提交路径/URL/任意宿主命令；脏源与跟踪的私密配置被拒绝 |

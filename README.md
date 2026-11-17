@@ -26,6 +26,7 @@ ChatTask 的主模型是 **任务 → Codex + Sandbox → 结果**。任务说�
 从 0.1.4 起，受信 Workspace 可创建资料快照、单独确认运行，并回读真实模型生成的摘要校验报告。Task 页面「材料分析」显示任务来源与 Run 历史。这是只读材料执行器，不调用工具或读取宿主文件，也不会把报告完成标成原建议完成；配置、认证与 HTTP 合约见[材料分析接入](docs/workspace.md)。
 
 ```bash
+python -m pip install -e ./packages/chatsandbox
 python -m pip install -e '.[web,dev]'
 chattask --tree
 chattask paths --json-output
@@ -33,7 +34,7 @@ chattask repository register --id demo --path /srv/managed/demo --github-repo ow
 chattask serve --env-profile site --host 127.0.0.1 --port 8000
 ```
 
-必须先配置已有 OpenSandbox 控制面、站点账号和既有 PyPI ChatEnv 命名连接 `task-tools`；配置详情见[快速接入](docs/index.md)。仓库路径只可通过服务器 CLI 登记，浏览器只能选择 ID。Web、Tool、Sandbox 和 ChatGH 的真实生产验收由部署方完成；源码测试使用标明的合成依赖。
+必须先配置原 OpenSandbox Docker 连接或显式的 ChatSandbox 命名 profile、站点账号和既有 PyPI ChatEnv 命名连接 `task-tools`；见[快速接入](docs/index.md)与[公共后端](docs/sandbox-backends.md)。同仓库 `packages/chatsandbox/` 是独立发行包，先从源码安装，公开发布需先于依赖它的新版 ChatTask。仓库路径只可通过服务器 CLI 登记，浏览器只能选择 ID。Web、Tool、Sandbox 和 ChatGH 的真实生产验收由部署方完成；源码测试使用标明的合成依赖。
 
 ## 边界
 

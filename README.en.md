@@ -41,3 +41,7 @@ Configure the legacy OpenSandbox Docker connection or an explicit ChatSandbox na
 This is a trusted single-user service. Project build/test code executes only inside the Sandbox; ordinary Docker/runc is not strong hostile-code isolation. Run records survive restarts, but interrupted work requires reconciliation and uncertain writes are never replayed automatically. Login sessions and old Shell history still do not survive restarts. Candidate source does not imply deployment or publication.
 
 [CLI](docs/cli-tree.en.md) · [Capabilities](docs/capability-map.en.md) · [Python API](docs/interface-tree.en.md)
+
+## Sandbox image publishing
+
+The repository includes a dependency-pinned SymPy image and a GitHub Actions build/publish workflow. Clients need no Docker installation; operators import the digest-preserving OCI artifact and approve the exact image for a caller before SDK use. See [image creation, publication and admission](docs/sandbox-images.en.md).

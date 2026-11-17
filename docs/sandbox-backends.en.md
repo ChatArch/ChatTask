@@ -68,3 +68,7 @@ chatsandbox --tree
 ```
 
 First release ChatSandbox through its PR, checks, merge, tag, and verified PyPI artifacts; then release ChatTask against that compatible version. Task's tag workflow checks that a compatible ChatSandbox wheel is available before publishing. These source changes neither publish registry artifacts nor switch existing services. Real Docker/Kubernetes, SDK, browser, and model/tool integration remains a deployment acceptance task.
+
+## Create and publish environment images
+
+See [Sandbox image publishing](sandbox-images.en.md) for image sources, dependency locks, CI publication and node admission. Registry publishing identity remains separate from the caller Key; runtime access still requires exact image approval and resource budgets.

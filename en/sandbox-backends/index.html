@@ -14,7 +14,7 @@
         <link rel="prev" href="../workspace/">
       
       
-        <link rel="next" href="../cli-tree/">
+        <link rel="next" href="../sandbox-images/">
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
@@ -291,6 +291,25 @@
   
   
   
+    <li class="md-tabs__item">
+      <a href="../sandbox-images/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Sandbox Image Publishing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
     
     
       <li class="md-tabs__item">
@@ -509,10 +528,41 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#create-and-publish-environment-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      Create and publish environment images
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sandbox-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Sandbox Image Publishing
+    
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -539,10 +589,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -555,8 +605,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             Commands and APIs
           </label>
@@ -700,6 +750,15 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#create-and-publish-environment-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      Create and publish environment images
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -773,6 +832,8 @@
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>chatsandbox<span class="w"> </span>--tree
 </code></pre></div>
 <p>First release ChatSandbox through its PR, checks, merge, tag, and verified PyPI artifacts; then release ChatTask against that compatible version. Task's tag workflow checks that a compatible ChatSandbox wheel is available before publishing. These source changes neither publish registry artifacts nor switch existing services. Real Docker/Kubernetes, SDK, browser, and model/tool integration remains a deployment acceptance task.</p>
+<h2 id="create-and-publish-environment-images">Create and publish environment images<a class="headerlink" href="#create-and-publish-environment-images" title="Permanent link">&para;</a></h2>
+<p>See <a href="../sandbox-images/">Sandbox image publishing</a> for image sources, dependency locks, CI publication and node admission. Registry publishing identity remains separate from the caller Key; runtime access still requires exact image approval and resource budgets.</p>
 
 
 

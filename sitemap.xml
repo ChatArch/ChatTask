@@ -43,6 +43,13 @@
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/en/sandbox-backends/"/>
     </url>
     <url>
+        <loc>https://arch.gh.wzhecnu.cn/ChatTask/sandbox-images/</loc>
+        <lastmod>2026-11-17</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/sandbox-images/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/en/sandbox-images/"/>
+    </url>
+    <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/tasks/</loc>
         <lastmod>2026-11-17</lastmod>
         <changefreq>daily</changefreq>
@@ -97,6 +104,13 @@
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/en/sandbox-backends/"/>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/sandbox-backends/"/>
+    </url>
+    <url>
+        <loc>https://arch.gh.wzhecnu.cn/ChatTask/en/sandbox-images/</loc>
+        <lastmod>2026-11-17</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/en/sandbox-images/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/sandbox-images/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/en/tasks/</loc>

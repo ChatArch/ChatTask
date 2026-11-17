@@ -34,6 +34,8 @@ GHCR 首次发布的包可能仍是 private。公开源码不意味着包已允�
 
 ## 接入运行池
 
+OCI Registry 是可替换的存储后端。部署方也可将同一发布归档用 digest 保真复制导入自己的私有镜像平台，再以该平台的精确 repository 引用授权 caller；构建产物无需重建，Registry 的读写认证也不会因此变成 Sandbox Key。具体域名和凭据由部署环境配置，不进入公开源码。
+
 部署方核验运行来自本仓库默认分支的实际成功发布、精确源码 commit、OCI 所有 blob 的摘要、平台和镜像内容，再选择：让 worker 从已授权 Registry 拉取，或将这份 OCI 归档导入各 worker。导入后必须核对镜像 manifest/config digest 和 CRI 可用性，不能只看别名。受限网络可以使用后者，不要求外部客户端加入内网。
 
 随后仅向目标 caller 的 `allowed_images` 增加 `image-release.json` 中的精确 `image_ref`，保留其动作、配额、期限和其他镜像。镜像 GC 与保留策略由部署方管理；发布新版本不代表旧镜像可以立即清理，仍需确认没有活动实例依赖它。Sandbox 公网 API 不接受 Dockerfile、镜像 tar 或 Registry credentials，也没有隐式 build/push 接口。

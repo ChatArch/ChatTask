@@ -34,6 +34,8 @@ New GHCR packages may initially be private. Public source does not imply anonymo
 
 ## Admit the image to the runtime pool
 
+The OCI registry is a replaceable storage backend. Operators can also copy the same artifact with digest preservation into their own private image platform and approve its exact repository reference for a caller. This does not require rebuilding the image or turn registry authentication into a Sandbox Key. Deployment-specific domains and credentials stay outside public source.
+
 Operators verify successful publication from the repository's default branch, exact source commit, all OCI blob digests, platform and image contents. Workers can then pull from an authorized registry or import the same OCI archive. Verify the imported manifest/config digests and CRI availability rather than an image alias. Archive import supports workers with restricted registry connectivity without connecting external SDK consumers to the private network.
 
 Add only the receipt's exact `image_ref` to the intended caller's `allowed_images`, preserving its actions, quotas, expiry and existing images. Operators own image retention and GC; publishing a replacement does not establish that the previous image has no active users. The Sandbox public API does not accept Dockerfiles, image archives or registry credentials and has no implicit build/push operation.

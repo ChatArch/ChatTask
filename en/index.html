@@ -270,6 +270,25 @@
   
   
   
+    <li class="md-tabs__item">
+      <a href="sandbox-backends/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Shared Sandbox Backends
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
     
     
       <li class="md-tabs__item">
@@ -480,6 +499,28 @@
   
   
   
+    <li class="md-nav__item">
+      <a href="sandbox-backends/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Shared Sandbox Backends
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
     
     
     
@@ -496,10 +537,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   
@@ -512,8 +553,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             Commands and APIs
           </label>
@@ -685,14 +726,15 @@
 <p>These template capabilities start in ChatTask 0.1.0; historical PyPI 0.0.2 is only a CLI scaffold. Check the actual PyPI version before installing. The older integer-statistics task and persistent Shell experiment remain in the primary navigation.</p>
 <h2 id="architecture-and-prerequisites">Architecture and prerequisites<a class="headerlink" href="#architecture-and-prerequisites" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Authenticated Web → ChatTask templates/private runs → ChatPyPI metadata tool
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                                           └→ OpenSandbox → tracked-source test/build/check
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                                           └→ ChatSandbox → OpenSandbox runtime → tracked-source test/build/check
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Exact approval → ChatGH/GitHub merged PR and checks → tag → existing OIDC publish workflow
 </code></pre></div>
-<p>Provide an existing OpenSandbox control plane and Docker access, a fixed site account, a published ChatPyPI service, a native ChatAuth access token and an existing PyPI ChatEnv named profile. The operator owns installation, deployment, token issue and renewal. ChatTask does not provision them. Each Sandbox remains bounded by the 600-second backend TTL, 1 CPU, 512 MiB, 128 PIDs, loopback ports and no host mounts. Project build/test code runs only inside it.</p>
+<p>Provide the legacy OpenSandbox Docker connection or an explicit ChatSandbox named profile, a fixed site account, a published ChatPyPI service, a native ChatAuth access token and an existing PyPI ChatEnv named profile. The operator owns installation, deployment, token issue and renewal. The default template uses a 600-second TTL; legacy Docker policy retains 1 CPU, 512 MiB, 128 PIDs, loopback ports and no host mounts. Remote providers supply corresponding protected runtime evidence. Project build/test code runs only inside the selected Sandbox. See <a href="sandbox-backends/">shared backends</a> for migration and independent package release order.</p>
 <h2 id="candidate-setup">Candidate setup<a class="headerlink" href="#candidate-setup" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s1">'.[web]'</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>chattask<span class="w"> </span>--tree
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>chattask<span class="w"> </span>paths<span class="w"> </span>--json-output
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>./packages/chatsandbox
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s1">'.[web]'</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>chattask<span class="w"> </span>--tree
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>chattask<span class="w"> </span>paths<span class="w"> </span>--json-output
 </code></pre></div>
 <p>Create a ChatTask ChatEnv named profile such as <code>site</code> with actual values corresponding to these placeholders:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>CHATTASK_SANDBOX_ENDPOINT=http://127.0.0.1:8080

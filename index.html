@@ -270,6 +270,25 @@
   
   
   
+    <li class="md-tabs__item">
+      <a href="sandbox-backends/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  公共 Sandbox 后端
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
     
     
       <li class="md-tabs__item">
@@ -480,6 +499,28 @@
   
   
   
+    <li class="md-nav__item">
+      <a href="sandbox-backends/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    公共 Sandbox 后端
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
     
     
     
@@ -496,10 +537,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   
@@ -512,8 +553,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             命令与接口
           </label>
@@ -685,14 +726,15 @@
 <p>以下任务模板能力从 ChatTask 0.1.0 开始提供；历史 PyPI 0.0.2 仅为命令行骨架，不具备这些接口。安装前请核对 PyPI 的实际版本。原有整数统计与持续 Shell 实验仍可在网页主导航中使用。</p>
 <h2 id="_1">架构与前置条件<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>登录网页 → ChatTask 模板/私有运行记录 → ChatPyPI 元数据工具
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                                  └→ OpenSandbox → 跟踪源码测试、构建、检查
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                                  └→ ChatSandbox → OpenSandbox运行后端 → 跟踪源码测试、构建、检查
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>明确批准 → ChatGH/GitHub 已合并 PR 与检查 → 标签 → 既有 OIDC 发布工作流
 </code></pre></div>
-<p>准备现有 OpenSandbox 控制面与 Docker、固定站点账号、发布版 ChatPyPI 服务、原生 ChatAuth 访问令牌，以及已有 PyPI ChatEnv 命名 profile。安装、服务部署、令牌签发与更新属于运行方，不由 ChatTask 自动完成。单个 Sandbox 仍受 600 秒底层 TTL、1 CPU、512 MiB、PIDs 128、回环端口和零宿主挂载约束；项目构建/测试代码只在其中执行。</p>
+<p>准备原 OpenSandbox Docker 连接或显式ChatSandbox命名profile、固定站点账号、发布版ChatPyPI服务、原生ChatAuth访问令牌，以及已有PyPI ChatEnv命名profile。安装、服务部署、令牌签发与更新属于运行方，不由ChatTask自动完成。默认模板使用600秒TTL，既有Docker策略保持1 CPU、512 MiB、PIDs128、回环端口和零宿主挂载；远程后端提供对应的受保护运行证据。项目构建/测试代码只在所选Sandbox中执行。配置迁移与独立发行包先后顺序见<a href="sandbox-backends/">公共后端</a>。</p>
 <h2 id="_2">安装候选和设置<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s1">'.[web]'</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>chattask<span class="w"> </span>--tree
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>chattask<span class="w"> </span>paths<span class="w"> </span>--json-output
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>./packages/chatsandbox
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s1">'.[web]'</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>chattask<span class="w"> </span>--tree
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>chattask<span class="w"> </span>paths<span class="w"> </span>--json-output
 </code></pre></div>
 <p>建立 ChatTask ChatEnv 命名 profile，例如 <code>site</code>，填入占位值对应的实际配置：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>CHATTASK_SANDBOX_ENDPOINT=http://127.0.0.1:8080

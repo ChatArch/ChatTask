@@ -852,7 +852,7 @@
 </code></pre></div>
 <p>首次公开发布应先完成 ChatSandbox 的 PR、检查、合并、标签及 PyPI 产物验收，再发布依赖其兼容版本的 ChatTask。Task 的 tag workflow 会先检查兼容 ChatSandbox wheel 可用，阻止发布缺少依赖的发行包。Recall 生产目前安装的是任务定向构建的未发布 wheel；这不等于 PyPI 已更新，其他消费机器也不会自动获得它。</p>
 <h2 id="recall-2026-11-23">Recall 生产实测边界（2026-11-23）<a class="headerlink" href="#recall-2026-11-23" title="Permanent link">&para;</a></h2>
-<p>当前 <code>cluster</code> profile 与 CRS grant/namespace 共同允许 <strong>1 个实例，32 CPU、96GiB 内存、300GiB 临时盘、最长 2 小时</strong>。已在 <code>auc</code> worker 真实创建同规格 Pod，完成短 Python 命令、运行证据核验和删除后无残留；尚未进行持续高负载、完整 300GiB 写盘、SageMath/Mathlib 构建或 6 小时耐久验收。CRS 授权代码上限仍为 32 CPU/96GiB/7200s；<strong>256GiB 与 6 小时当前不可用</strong>。共享存储与多实例并行构建未提供。不得将一次短 smoke 写成这些工作负载的验收。</p>
+<p>当前 <code>cluster</code> profile 与 CRS grant/namespace 共同允许 <strong>1 个实例，32 CPU、256GiB 内存、300GiB 临时盘、最长 6 小时</strong>。已在 <code>auc</code> worker 真实创建同规格 Pod，完成短 Python 命令、运行证据核验、约 21600 秒到期时间读回和删除后无残留；尚未进行持续高负载、163GiB 峰值内存、完整 300GiB 写盘、SageMath/Mathlib 构建或 6 小时耐久验收。CRS 授权代码上限为 32 CPU/256GiB/21600s；共享存储与多实例并行构建未提供。不得将一次短 smoke 写成这些工作负载的验收。</p>
 <h2 id="_4">创建和发布环境镜像<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
 <p>镜像源码、固定依赖、CI 发布与节点接入流程见<a href="../sandbox-images/">Sandbox 镜像发布</a>。Registry 发布身份与调用方 Key 分开；实际运行仍以该 caller 的精确镜像批准和资源预算为准。</p>
 

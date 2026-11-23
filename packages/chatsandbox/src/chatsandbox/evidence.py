@@ -207,11 +207,12 @@ class KubernetesEvidenceReader:
             if _quantity(resources.get('cpu')) != expected_cpu or _quantity(resources.get('memory')) != expected_mem:
                 raise KubernetesEvidenceError('Sandbox CPU or memory policy mismatch')
             actual_storage = resources.get('ephemeral-storage')
-            if expected_storage is None:
-                if actual_storage is not None:
+            if expected_storage is not None:
+                # Only an explicitly reserved storage amount is attested. When
+                # the caller did not request storage, the cluster LimitRange may
+                # inject a platform default; tolerate it but keep storage unclaimed.
+                if actual_storage is None or _quantity(actual_storage) != expected_storage:
                     raise KubernetesEvidenceError('Sandbox storage policy mismatch')
-            elif actual_storage is None or _quantity(actual_storage) != expected_storage:
-                raise KubernetesEvidenceError('Sandbox storage policy mismatch')
         for init in spec.get('initContainers', []):
             resources = init.get('resources', {})
             if (_quantity(resources.get('limits', {}).get('cpu')) > expected_cpu or

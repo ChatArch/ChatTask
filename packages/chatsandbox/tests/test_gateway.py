@@ -72,6 +72,19 @@ def create(client,who='alice',**extra):
     return client.post('/v1/sandboxes',headers={'OPEN-SANDBOX-API-KEY':who+'-key',**extra},json=body)
 
 
+def test_create_with_ephemeral_storage_records_it_in_ledger(service):
+    client,native,evidence,verifier,ledger=service
+    body={'image':{'uri':'python:3.10-slim'},
+          'resourceLimits':{'cpu':'1','memory':'1Gi','ephemeral-storage':'50Gi'},
+          'resourceRequests':{'cpu':'1','memory':'1Gi','ephemeral-storage':'50Gi'},
+          'timeout':3600,'metadata':{'purpose':'chattask'}}
+    response=client.post('/v1/sandboxes',headers={'OPEN-SANDBOX-API-KEY':'alice-key'},json=body)
+    assert response.status_code==202
+    row=ledger.all()[0]
+    assert row['storage_mib']==51200
+    assert row['cpu_millis']==1000 and row['memory_mib']==1024
+
+
 def test_lifecycle_owner_listing_runtime_and_cleanup(service):
     client,native,evidence,verifier,ledger=service
     response=create(client); assert response.status_code==202

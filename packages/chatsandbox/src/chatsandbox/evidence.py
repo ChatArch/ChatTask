@@ -146,11 +146,13 @@ class KubernetesEvidenceReader:
         return [x for x in refs if x.get('kind') == 'BatchSandbox' and
                 x.get('apiVersion') == GROUP + '/' + VERSION and x.get('controller') is True]
 
-    def inspect_owned(self, sandbox_id, *, metadata=None, cpu_millis=1000, memory_mib=512):
+    def inspect_owned(self, sandbox_id, *, metadata=None, cpu_millis=1000, memory_mib=512, storage_mib=None):
         sandbox_id = self._id(sandbox_id)
         expected = _metadata({} if metadata is None else metadata)
         if type(cpu_millis) is not int or type(memory_mib) is not int or cpu_millis <= 0 or memory_mib <= 0:
             raise ValueError('Resource targets must be positive integers')
+        if storage_mib is not None and (type(storage_mib) is not int or storage_mib <= 0):
+            raise ValueError('Storage target must be a positive integer or absent')
         workload = self._workload(sandbox_id)
         info = workload.get('metadata', {})
         labels = info.get('labels', {})
@@ -199,10 +201,17 @@ class KubernetesEvidenceReader:
                 raise KubernetesEvidenceError('Sandbox exposes host resources')
         main = containers[0]
         expected_cpu, expected_mem = Decimal(cpu_millis) / 1000, Decimal(memory_mib) * 1024 ** 2
+        expected_storage = None if storage_mib is None else Decimal(storage_mib) * 1024 ** 2
         for kind in ['requests', 'limits']:
             resources = main.get('resources', {}).get(kind, {})
             if _quantity(resources.get('cpu')) != expected_cpu or _quantity(resources.get('memory')) != expected_mem:
                 raise KubernetesEvidenceError('Sandbox CPU or memory policy mismatch')
+            actual_storage = resources.get('ephemeral-storage')
+            if expected_storage is None:
+                if actual_storage is not None:
+                    raise KubernetesEvidenceError('Sandbox storage policy mismatch')
+            elif actual_storage is None or _quantity(actual_storage) != expected_storage:
+                raise KubernetesEvidenceError('Sandbox storage policy mismatch')
         for init in spec.get('initContainers', []):
             resources = init.get('resources', {})
             if (_quantity(resources.get('limits', {}).get('cpu')) > expected_cpu or
@@ -219,6 +228,8 @@ class KubernetesEvidenceReader:
                 'image': main.get('image'), 'image_id': container_status[0]['imageID'],
                 'cpu_millis': cpu_millis, 'memory_mib': memory_mib,
                 'nano_cpus': cpu_millis * 1000000, 'memory_bytes': memory_mib * 1024 ** 2,
+                'storage_mib': storage_mib,
+                'ephemeral_storage_bytes': None if storage_mib is None else storage_mib * 1024 ** 2,
                 'pids_limit': pids_limit, 'pids_limit_attested': pids_limit is not None,
                 'pids_evidence_source': 'kubelet-config+cgroup-baseline' if pids_limit is not None else None,
                 'privileged': False, 'host_namespaces': False, 'host_mount_count': 0,

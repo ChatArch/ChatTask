@@ -27,7 +27,72 @@ def response():
 
 def reserve(ledger, access, key='request', *, payload=None):
     return ledger.reserve(access, payload or {'image': 'synthetic'}, image='python:3.10-slim',
-                          cpu=1000, memory=512, ttl=120, idempotency=key)
+                          cpu=1000, memory=512, ttl=120, idempotency=key, storage_mib=None)
+
+
+def test_storage_is_recorded_and_visible_in_ledger(tmp_path):
+    ledger = Ledger(tmp_path / 'private' / 'instances.sqlite3')
+    generous = Grant('big-key', 'big', '1' * 64,
+                     ('create', 'list', 'connect', 'exec', 'files', 'renew', 'delete'),
+                     ('python:3.10-slim',), (44772,), 2, 4000, 16384, 43200)
+    row, new = ledger.reserve(generous, {'image': 'synthetic'}, image='python:3.10-slim',
+                              cpu=2000, memory=8192, ttl=3600, idempotency='big',
+                              storage_mib=51200)
+    assert new and row['storage_mib'] == 51200
+    assert Ledger(ledger.path).all()[0]['storage_mib'] == 51200
+
+
+def test_storage_reservations_share_a_global_budget_across_callers(tmp_path):
+    ledger = Ledger(tmp_path / 'private' / 'instances.sqlite3')
+    alice = replace(grant('alice', count=2), max_memory_mib=16384)
+    bob = replace(grant('bob', count=2), max_memory_mib=16384)
+    first, _ = ledger.reserve(alice, {'image': 'synthetic'}, image='python:3.10-slim',
+                              cpu=2000, memory=8192, ttl=120, idempotency='a',
+                              storage_mib=51200, storage_budget_mib=102400)
+    ledger.reserve(bob, {'image': 'synthetic'}, image='python:3.10-slim',
+                   cpu=2000, memory=8192, ttl=120, idempotency='b',
+                   storage_mib=51200, storage_budget_mib=102400)
+    with pytest.raises(AccessDenied) as error:
+        ledger.reserve(alice, {'image': 'synthetic'}, image='python:3.10-slim',
+                       cpu=1000, memory=512, ttl=120, idempotency='c',
+                       storage_mib=None, storage_budget_mib=102400)
+    assert error.value.status == 429
+    ledger.state(first['request_id'], 'absent')
+    assert ledger.reserve(alice, {'image': 'synthetic'}, image='python:3.10-slim',
+                          cpu=1000, memory=512, ttl=120, idempotency='c',
+                          storage_mib=None, storage_budget_mib=102400)[1]
+
+
+def test_legacy_rows_without_storage_read_back_as_none(tmp_path):
+    path = tmp_path / 'private' / 'instances.sqlite3'
+    ledger = Ledger(path)
+    ledger.reserve(grant(), {'image': 'synthetic'}, image='python:3.10-slim',
+                   cpu=1000, memory=512, ttl=120, idempotency='legacy', storage_mib=None)
+    row = ledger.all()[0]
+    assert row['storage_mib'] is None and row['memory_mib'] == 512
+
+
+def test_pre_storage_sqlite_schema_is_migrated_without_losing_legacy_rows(tmp_path):
+    import sqlite3
+
+    tmp_path.chmod(0o700)
+    path = tmp_path / 'legacy.sqlite3'
+    with sqlite3.connect(path) as db:
+        db.execute('''CREATE TABLE instances (
+            request_id TEXT PRIMARY KEY, caller_id TEXT NOT NULL, key_id TEXT NOT NULL,
+            sandbox_id TEXT UNIQUE, state TEXT NOT NULL, image TEXT NOT NULL,
+            cpu_millis INTEGER NOT NULL, memory_mib INTEGER NOT NULL,
+            created REAL NOT NULL, expires_at REAL NOT NULL, max_deadline REAL NOT NULL,
+            metadata TEXT NOT NULL, body_hash TEXT NOT NULL)''')
+        db.execute('''INSERT INTO instances VALUES (
+            'legacy-request','legacy','legacy-key','legacy-sandbox','active','python:3.10-slim',
+            1000,512,1,2,3,'{}','legacy-hash')''')
+    path.chmod(0o600)
+
+    migrated = Ledger(path)
+    row = migrated.owned('legacy-sandbox', 'legacy')
+    assert row['storage_mib'] is None
+    assert row['cpu_millis'] == 1000 and row['memory_mib'] == 512
 
 
 def test_atomic_budget_and_caller_scoped_idempotency(tmp_path):

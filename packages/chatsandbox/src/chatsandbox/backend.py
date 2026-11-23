@@ -104,16 +104,19 @@ class SandboxBackend:
         return self.evidence.verify_absent(sandbox_id)
 
     async def create(self, *, ttl_seconds=600, metadata=None):
-        if type(ttl_seconds) is not int or not 60 <= ttl_seconds <= 7200:
-            raise ValueError('sandbox lifetime must be 60–7200 seconds')
+        if type(ttl_seconds) is not int or not 60 <= ttl_seconds <= self.settings.max_ttl_seconds:
+            raise ValueError('sandbox lifetime must be between 60 and the configured maximum')
         cfg, sandbox = self.connection(), None
         try:
-            cpu = self.settings.cpu_millis
-            sandbox = await self.sdk.create(self.settings.image,
-                entrypoint=['/bin/sh', '-c', 'sleep 7200'], timeout=timedelta(seconds=ttl_seconds),
+            s = self.settings
+            resource = {'cpu': str(s.cpu_millis // 1000) if s.cpu_millis % 1000 == 0 else str(s.cpu_millis) + 'm',
+                        'memory': str(s.memory_mib) + 'Mi'}
+            if s.storage_mib is not None:
+                resource['ephemeral-storage'] = str(s.storage_mib) + 'Mi'
+            sandbox = await self.sdk.create(s.image,
+                entrypoint=['/bin/sh', '-c', 'sleep infinity'], timeout=timedelta(seconds=ttl_seconds),
                 ready_timeout=timedelta(seconds=35), metadata=metadata or {},
-                resource={'cpu': str(cpu // 1000) if cpu % 1000 == 0 else str(cpu) + 'm',
-                          'memory': str(self.settings.memory_mib) + 'Mi'}, connection_config=cfg)
+                resource=resource, resource_requests=resource, connection_config=cfg)
             return sandbox, cfg, self.inspect_owned(sandbox.id)
         except BaseException:
             if sandbox is not None:

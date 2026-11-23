@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 from chatenv import EnvStore, get_paths
 
-from chatsandbox.config import BackendSettings, ChatSandboxConfig, load_backend_settings, origin, outbound_proxy, private_value
+from chatsandbox import auth, evidence, gateway, ledger
+from chatsandbox.config import BackendSettings, ChatSandboxConfig, load_backend_settings, load_server, origin, outbound_proxy, private_value
 
 
 SYNTHETIC_KEY = 'synthetic-unit-test-credential'
@@ -48,6 +49,121 @@ def test_named_profile_uses_selected_home_without_process_key_fallback(tmp_path,
     assert settings.image == 'approved-image@sha256:example'
     save_profile(home)
     with pytest.raises(ValueError): load_backend_settings('consumer', home=home)
+
+
+def test_resource_and_lifetime_overrides_are_loaded_from_private_profile(tmp_path):
+    home = tmp_path / 'resource-home'
+    save_profile(home, CHATSANDBOX_API_KEY=SYNTHETIC_KEY,
+                 CHATSANDBOX_CPU_MILLIS='2000', CHATSANDBOX_MEMORY_MIB='8192',
+                 CHATSANDBOX_PIDS_LIMIT='4096', CHATSANDBOX_STORAGE_MIB='51200',
+                 CHATSANDBOX_MAX_TTL_SECONDS='43200')
+    settings = load_backend_settings('consumer', home=home)
+    assert settings.cpu_millis == 2000
+    assert settings.memory_mib == 8192
+    assert settings.pids_limit == 4096
+    assert settings.storage_mib == 51200
+    assert settings.max_ttl_seconds == 43200
+
+
+def test_server_profile_wires_configured_storage_budget(tmp_path, monkeypatch):
+    home = tmp_path / 'server-home'
+    internal_key = tmp_path / 'internal.key'
+    signing_key = tmp_path / 'signing.key'
+    kubeconfig = tmp_path / 'evidence.kubeconfig'
+    internal_key.write_text('synthetic-internal-key')
+    signing_key.write_text('x' * 32)
+    kubeconfig.write_text('apiVersion: v1\nkind: Config\n')
+    for path in [internal_key, signing_key, kubeconfig]:
+        path.chmod(0o600)
+    EnvStore(get_paths(home).envs_dir).save_profile(ChatSandboxConfig, 'server', {
+        'CHATSANDBOX_CRS_ORIGIN': 'https://crs.example.test',
+        'CHATSANDBOX_INTERNAL_API': 'http://native.example.test',
+        'CHATSANDBOX_INTERNAL_INGRESS': 'http://ingress.example.test',
+        'CHATSANDBOX_INTERNAL_KEY_FILE': str(internal_key),
+        'CHATSANDBOX_SIGNING_KEY_FILE': str(signing_key),
+        'CHATSANDBOX_PUBLIC_ORIGIN': 'https://sandbox.example.test',
+        'CHATSANDBOX_KUBECONFIG': str(kubeconfig),
+        'CHATSANDBOX_NAMESPACE': 'opensandbox',
+        'CHATSANDBOX_MAX_STORAGE_MIB': '102400',
+    })
+    captured = {}
+    class FakeVerifier:
+        def __init__(self, origin, proxy=None): self.origin, self.proxy = origin, proxy
+    class FakeReader:
+        def __init__(self, namespace, kubeconfig=None): self.namespace, self.kubeconfig = namespace, kubeconfig
+    class FakeLedger:
+        def __init__(self, path): self.path = path
+    def fake_create_app(settings, **kwargs):
+        captured['settings'] = settings
+        captured.update(kwargs)
+        return 'synthetic-app'
+    monkeypatch.setattr(auth, 'CRSVerifier', FakeVerifier)
+    monkeypatch.setattr(evidence, 'KubernetesEvidenceReader', FakeReader)
+    monkeypatch.setattr(ledger, 'Ledger', FakeLedger)
+    monkeypatch.setattr(gateway, 'create_app', fake_create_app)
+
+    assert load_server('server', home=home) == 'synthetic-app'
+    assert captured['settings'].max_storage_mib == 102400
+
+
+@pytest.mark.parametrize('field,value', [
+    ('CHATSANDBOX_CPU_MILLIS', '0'),
+    ('CHATSANDBOX_MEMORY_MIB', '1.5'),
+    ('CHATSANDBOX_PIDS_LIMIT', '-1'),
+    ('CHATSANDBOX_STORAGE_MIB', '50Gi'),
+    ('CHATSANDBOX_MAX_TTL_SECONDS', '59'),
+])
+def test_invalid_resource_and_lifetime_overrides_fail_closed(tmp_path, field, value):
+    home = tmp_path / 'invalid-resource-home'
+    save_profile(home, CHATSANDBOX_API_KEY=SYNTHETIC_KEY, **{field: value})
+    with pytest.raises(ValueError):
+        load_backend_settings('consumer', home=home)
+
+
+def test_server_profile_wires_configured_maximum_ttl(tmp_path, monkeypatch):
+    home = tmp_path / 'server-home'
+    internal_key = tmp_path / 'internal.key'
+    signing_key = tmp_path / 'signing.key'
+    kubeconfig = tmp_path / 'evidence.kubeconfig'
+    internal_key.write_text('synthetic-internal-key')
+    signing_key.write_text('x' * 32)
+    kubeconfig.write_text('apiVersion: v1\nkind: Config\n')
+    for path in [internal_key, signing_key, kubeconfig]:
+        path.chmod(0o600)
+    EnvStore(get_paths(home).envs_dir).save_profile(ChatSandboxConfig, 'server', {
+        'CHATSANDBOX_CRS_ORIGIN': 'https://crs.example.test',
+        'CHATSANDBOX_INTERNAL_API': 'http://native.example.test',
+        'CHATSANDBOX_INTERNAL_INGRESS': 'http://ingress.example.test',
+        'CHATSANDBOX_INTERNAL_KEY_FILE': str(internal_key),
+        'CHATSANDBOX_SIGNING_KEY_FILE': str(signing_key),
+        'CHATSANDBOX_PUBLIC_ORIGIN': 'https://sandbox.example.test',
+        'CHATSANDBOX_KUBECONFIG': str(kubeconfig),
+        'CHATSANDBOX_NAMESPACE': 'opensandbox',
+        'CHATSANDBOX_MAX_TTL_SECONDS': '43200',
+    })
+    captured = {}
+    class FakeVerifier:
+        def __init__(self, origin, proxy=None):
+            self.origin, self.proxy = origin, proxy
+    class FakeReader:
+        def __init__(self, namespace, kubeconfig=None):
+            self.namespace, self.kubeconfig = namespace, kubeconfig
+    class FakeLedger:
+        def __init__(self, path):
+            self.path = path
+    def fake_create_app(settings, **kwargs):
+        captured['settings'] = settings
+        captured.update(kwargs)
+        return 'synthetic-app'
+    monkeypatch.setattr(auth, 'CRSVerifier', FakeVerifier)
+    monkeypatch.setattr(evidence, 'KubernetesEvidenceReader', FakeReader)
+    monkeypatch.setattr(ledger, 'Ledger', FakeLedger)
+    monkeypatch.setattr(gateway, 'create_app', fake_create_app)
+
+    assert load_server('server', home=home) == 'synthetic-app'
+    assert captured['settings'].max_ttl_seconds == 43200
+    assert captured['evidence'].namespace == 'opensandbox'
+    assert captured['evidence'].kubeconfig == str(kubeconfig)
 
 
 @pytest.mark.parametrize('name', ['', '../consumer', '/consumer', 'has space', 'a' * 129, None])

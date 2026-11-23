@@ -31,7 +31,22 @@ def metadata_filter(value):
     except ValueError: raise AccessDenied(400,'invalid_metadata_filter') from None
 
 
-def create_policy(body):
+def _memory_to_mib(value):
+    match = re.fullmatch(r'([0-9]+)(Mi|Gi)', str(value))
+    if not match:
+        raise ValueError()
+    return int(match[1]) * (1024 if match[2] == 'Gi' else 1)
+
+
+def _storage_to_mib(value):
+    """Parse Kubernetes ephemeral-storage binary quantities (Mi/Gi only)."""
+    match = re.fullmatch(r'([0-9]+)(Mi|Gi)', str(value))
+    if not match:
+        raise ValueError()
+    return int(match[1]) * (1024 if match[2] == 'Gi' else 1)
+
+
+def create_policy(body, *, max_ttl_seconds=7200, max_storage_mib=None):
     allowed={'image','entrypoint','timeout','resourceLimits','resourceRequests','env','metadata','secureAccess','extensions','networkPolicy','volumes'}
     if not isinstance(body,dict) or set(body)-allowed or any(body.get(k) for k in ['extensions','networkPolicy','volumes']):
         raise AccessDenied(400,'sandbox_feature_not_enabled')
@@ -39,23 +54,26 @@ def create_policy(body):
     if not isinstance(image,dict) or set(image)-{'uri'} or not isinstance(image.get('uri'),str):
         raise AccessDenied(400,'invalid_sandbox_image')
     limits=body.get('resourceLimits')
-    if not isinstance(limits,dict) or set(limits)!={'cpu','memory'}:
+    allowed_resources={'cpu','memory','ephemeral-storage'}
+    if not isinstance(limits,dict) or not {'cpu','memory'} <= set(limits) or not set(limits) <= allowed_resources:
         raise AccessDenied(400,'explicit_sandbox_resources_required')
-    if body.get('resourceRequests') not in (None,limits):
+    requests=body.get('resourceRequests')
+    if requests not in (None,limits):
         raise AccessDenied(400,'sandbox_requests_must_match_limits')
     try:
         raw=str(limits['cpu']); cpu=Decimal(raw[:-1]) if raw.endswith('m') else Decimal(raw)*1000
         if not cpu.is_finite() or cpu<=0 or cpu!=int(cpu): raise ValueError()
-        match=re.fullmatch(r'([0-9]+)(Mi|Gi)',str(limits['memory']))
-        if not match: raise ValueError()
-        memory=int(match[1])*(1024 if match[2]=='Gi' else 1)
+        memory=_memory_to_mib(limits['memory'])
+        storage_mib = _storage_to_mib(limits['ephemeral-storage']) if 'ephemeral-storage' in limits else None
         # The fixed init container requests 100m/64Mi. Requiring at least
         # that much keeps the Pod's effective budget within this reservation.
         if not 64<=memory<=2**31-1 or not 100<=cpu<=2**31-1: raise ValueError()
+        if storage_mib is not None and (not 256<=storage_mib<=2**31-1 or
+                                        max_storage_mib is not None and storage_mib>max_storage_mib): raise ValueError()
     except (InvalidOperation,TypeError,ValueError,OverflowError):
         raise AccessDenied(400,'invalid_sandbox_resources') from None
     ttl=body.get('timeout',600)
-    if type(ttl) is not int or not 60<=ttl<=7200: raise AccessDenied(400,'invalid_sandbox_ttl')
+    if type(ttl) is not int or not 60<=ttl<=max_ttl_seconds: raise AccessDenied(400,'invalid_sandbox_ttl')
     metadata=body.get('metadata') or {}
     if not isinstance(metadata,dict) or {OWNER,REQUEST}.intersection(metadata) or len(metadata)>30:
         raise AccessDenied(400,'invalid_sandbox_metadata')
@@ -63,7 +81,7 @@ def create_policy(body):
         if (not isinstance(key,str) or not re.fullmatch(r'[A-Za-z0-9]([A-Za-z0-9_.-]{0,61}[A-Za-z0-9])?',key) or
                 not isinstance(value,str) or len(value)>63 or value and not re.fullmatch(r'[A-Za-z0-9]([A-Za-z0-9_.-]*[A-Za-z0-9])?',value)):
             raise AccessDenied(400,'invalid_sandbox_metadata')
-    return image['uri'],int(cpu),memory,ttl
+    return image['uri'],int(cpu),memory,storage_mib,ttl
 
 
 def expiration(body):

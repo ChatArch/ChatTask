@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from chatsandbox.auth import AccessDenied,Grant
 from chatsandbox.gateway import GatewaySettings,create_app
 from chatsandbox.ledger import Ledger
+from chatsandbox import __version__
 
 
 class Verifier:
@@ -70,6 +71,11 @@ def service(tmp_path):
 def create(client,who='alice',**extra):
     body={'image':{'uri':'python:3.10-slim'},'resourceLimits':{'cpu':'1','memory':'512Mi'},'timeout':120,'metadata':{'purpose':'chattask'}}
     return client.post('/v1/sandboxes',headers={'OPEN-SANDBOX-API-KEY':who+'-key',**extra},json=body)
+
+
+def test_health_reports_package_version(service):
+    client, *_ = service
+    assert client.get('/health').json()['version'] == __version__
 
 
 def test_create_with_ephemeral_storage_records_it_in_ledger(service):

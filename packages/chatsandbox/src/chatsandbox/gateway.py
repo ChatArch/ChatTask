@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from .auth import AccessDenied
 from .config import origin
 from .routing import OWNER,REQUEST,RouteTokens,identity,create_policy,metadata_filter,expiration,data_action
-from . import proxy
+from . import proxy, __version__
 
 
 @dataclass(frozen=True)
@@ -84,7 +84,7 @@ def create_app(settings,*,verifier,evidence,ledger,transport=None,reconcile_inte
         return JSONResponse({'code':error.code,'message':error.code},status_code=error.status,headers={'Cache-Control':'no-store'})
 
     @app.get('/health')
-    async def health(): return {'status':'ready','package':'ChatSandbox','version':'0.1.0'}
+    async def health(): return {'status':'ready','package':'ChatSandbox','version':__version__}
 
     async def json_body(request):
         data=bytearray()

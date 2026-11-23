@@ -2,8 +2,12 @@
 
 ## 未发布
 
+## 0.1.7 — 2026-11-23
+
 - 增加固定基础镜像和 wheel 摘要的 SymPy 示例环境，以及只在默认分支手动发布的 Sandbox Image 工作流。CI 以短期 GITHUB_TOKEN 推送 GHCR，同时交付 manifest digest 保真的 OCI 归档和发布回执。
 - 增加已批准 digest 的公网 SDK 示例与中英文镜像创建、发布、节点接入说明；Registry 权限和 Sandbox caller grant 分离，保持现有包协议与 CLI 不变。
+- 依赖已公开发布的 ChatSandbox 0.1.1，远程 backend 按命名 profile 提交匹配的 CPU/内存/临时盘 requests/limits；TaskService 的最大寿命跟随 backend 配置，不再固定 7200 秒。
+- 网页明确标注生产 SDK 单实例 32 CPU/256GiB/300GiB/6 小时的短 smoke 边界，区分网页任务/短会话自身时长限制、未完成的满载/满盘/耐久及 SageMath/Mathlib 验收。
 
 ## 0.1.6 — 2026-11-17
 

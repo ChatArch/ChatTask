@@ -2,126 +2,126 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/"/>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/deven/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/capability-map/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/capability-map/"/>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/deven/capability-map/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/cli-tree/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/cli-tree/"/>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/deven/cli-tree/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/interface-tree/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/interface-tree/"/>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/deven/interface-tree/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/research/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/research/"/>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/deven/research/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/sandbox-backends/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/sandbox-backends/"/>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/deven/sandbox-backends/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/sandbox-images/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/sandbox-images/"/>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/deven/sandbox-images/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/tasks/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/tasks/"/>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/deven/tasks/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/workspace/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/workspace/"/>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/deven/workspace/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/en/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/en/"/>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/dev"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/en/capability-map/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/en/capability-map/"/>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/devcapability-map/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/en/cli-tree/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/en/cli-tree/"/>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/devcli-tree/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/en/interface-tree/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/en/interface-tree/"/>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/devinterface-tree/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/en/research/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/en/research/"/>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/devresearch/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/en/sandbox-backends/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/en/sandbox-backends/"/>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/devsandbox-backends/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/en/sandbox-images/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/en/sandbox-images/"/>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/devsandbox-images/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/en/tasks/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/en/tasks/"/>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/devtasks/"/>
     </url>
     <url>
         <loc>https://arch.gh.wzhecnu.cn/ChatTask/dev/en/workspace/</loc>
-        <lastmod>2026-11-17</lastmod>
+        <lastmod>2026-11-23</lastmod>
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="en" href="https://arch.gh.wzhecnu.cn/ChatTask/dev/en/workspace/"/>
         <xhtml:link rel="alternate" hreflang="zh" href="https://arch.gh.wzhecnu.cn/ChatTask/devworkspace/"/>

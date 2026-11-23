@@ -73,7 +73,7 @@ chatsandbox --tree
 
 ## Recall 生产实测边界（2026-11-23）
 
-当前 `cluster` profile 与 CRS grant/namespace 共同允许 **1 个实例，32 CPU、96GiB 内存、300GiB 临时盘、最长 2 小时**。已在 `auc` worker 真实创建同规格 Pod，完成短 Python 命令、运行证据核验和删除后无残留；尚未进行持续高负载、完整 300GiB 写盘、SageMath/Mathlib 构建或 6 小时耐久验收。CRS 授权代码上限仍为 32 CPU/96GiB/7200s；**256GiB 与 6 小时当前不可用**。共享存储与多实例并行构建未提供。不得将一次短 smoke 写成这些工作负载的验收。
+当前 `cluster` profile 与 CRS grant/namespace 共同允许 **1 个实例，32 CPU、256GiB 内存、300GiB 临时盘、最长 6 小时**。已在 `auc` worker 真实创建同规格 Pod，完成短 Python 命令、运行证据核验、约 21600 秒到期时间读回和删除后无残留；尚未进行持续高负载、163GiB 峰值内存、完整 300GiB 写盘、SageMath/Mathlib 构建或 6 小时耐久验收。CRS 授权代码上限为 32 CPU/256GiB/21600s；共享存储与多实例并行构建未提供。不得将一次短 smoke 写成这些工作负载的验收。
 
 ## 创建和发布环境镜像
 

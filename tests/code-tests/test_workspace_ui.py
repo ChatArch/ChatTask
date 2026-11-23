@@ -21,8 +21,8 @@ def test_native_analysis_tab_and_authenticated_deep_link_are_wired():
 
 def test_sandbox_capacity_note_distinguishes_sdk_limit_from_web_sessions():
     html = (ROOT/'src/chattask/web_static/index.html').read_text()
-    assert '32 CPU / 96GiB' in html and '300GiB 临时盘 / 2 小时' in html
-    assert '未验证满载或满盘' in html
+    assert '32 CPU / 256GiB' in html and '300GiB 临时盘 / 6 小时' in html
+    assert '未验证满载、满盘或连续运行 6 小时' in html
     assert '网页任务和短会话仍受各自模板与会话时长限制' in html
 
 

@@ -1,6 +1,6 @@
 """ChatTask: explicit task execution, sessions and an optional browser adapter."""
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 __all__ = ["__version__", "TaskService", "TaskSettings", "create_app", "state_paths", "WorkflowService", "TaskStore"]
 
 

@@ -36,6 +36,12 @@ CHATSANDBOX_PROVIDER=remote
 CHATSANDBOX_ENDPOINT=https://sandbox.example.test
 CHATSANDBOX_IMAGE=registry.example.test/approved-python@sha256:<operator-verified-digest>
 CHATSANDBOX_KEY_PROFILE=CRS/main
+# Set these only after the caller grant, namespace admission policy and worker
+# allocatable resources have independently been raised and read back.
+# CHATSANDBOX_CPU_MILLIS=32000
+# CHATSANDBOX_MEMORY_MIB=98304
+# CHATSANDBOX_STORAGE_MIB=307200
+# CHATSANDBOX_MAX_TTL_SECONDS=7200
 ```
 
 The image must already be available to the selected backend and explicitly allowed by the caller's Sandbox grant. The package does not build, publish or silently substitute images. The repository also supplies a reviewed SymPy image, a GitHub Actions publication workflow and an immutable-image SDK example; see [image publishing](https://arch.gh.wzhecnu.cn/ChatTask/sandbox-images/). Registry publication, node availability and caller grant approval are separate steps.
@@ -77,7 +83,7 @@ asyncio.run(main())
 
 The shared backend exposes `connection()`, `create()`, `connect()`, `inspect_owned()`, `find_owned(metadata)`, `verify_absent()`, `dispose()`, `for_image()` and `close()`. An explicit Docker adapter also exposes `require_docker_client()`; remote adapters reject that operation.
 
-The default workload policy remains 1 CPU, 512 MiB and 128 PIDs. Docker evidence verifies the exact sandbox container name, loopback-only published ports, matching resource limits, no privilege and no mounts. Its receipt fields remain compatible with existing persisted Task runs.
+The default workload policy remains 1 CPU, 512 MiB and 128 PIDs. Remote profiles can set `CHATSANDBOX_CPU_MILLIS`, `CHATSANDBOX_MEMORY_MIB`, `CHATSANDBOX_PIDS_LIMIT`, and `CHATSANDBOX_STORAGE_MIB` (MiB of ephemeral storage); `CHATSANDBOX_MAX_TTL_SECONDS` controls the client-side TTL ceiling. The backend sends matching Kubernetes resource requests and limits. Docker evidence verifies the exact sandbox container name, loopback-only published ports, matching resource limits, no privilege and no mounts. Its receipt fields remain compatible with existing persisted Task runs.
 
 Remote evidence comes from the authenticated gateway, which checks Kubernetes workload identity and policy using a dedicated read-only account. Consumers check CPU, memory, an attested PID limit, privilege, host namespace/mount use and ServiceAccount automount policy. Missing or mismatched evidence fails; a successful lifecycle HTTP response alone is insufficient. Stable receipt identity is preserved across observations for durable recovery.
 
@@ -91,7 +97,7 @@ The gateway supports this explicit subset of OpenSandbox 1.1.0:
 
 | Capability | Boundary |
 | --- | --- |
-| Create and list | Explicit approved image, CPU/memory limits, bounded TTL and simple metadata. Results are scoped to the authenticated caller. |
+| Create and list | Explicit approved image, CPU/memory limits, optional matching ephemeral-storage requests/limits (`Mi` or `Gi`), bounded TTL and simple metadata. Results are scoped to the authenticated caller. |
 | Inspect, connect and delete | Caller-owned instances only. Runtime evidence is available at `/v1/sandboxes/<id>/evidence`. |
 | Renew | `POST /v1/sandboxes/<id>/renew-expiration`, within the instance's original maximum lifetime and current grant/Key expiry. |
 | Commands and files | Native execd command/session and file/directory routes on port **44772** only, subject to the grant's `exec` or `files` action. |
@@ -109,7 +115,7 @@ SDK 1.1.0 eagerly discovers port 18080 during ordinary create/connect even witho
 
 CRS validates caller identity and an explicit Sandbox grant without invoking the model business path. Grants specify actions, images, ports, concurrent instances, aggregate CPU/memory and maximum lifetime. The gateway reserves budgets atomically in its private SQLite ledger under `$CHATARCH_HOME/chatsandbox/state/` before forwarding a create.
 
-Create TTLs are 60–7200 seconds and may be further restricted by the grant or Key expiry. Renewing an instance cannot reset its original maximum deadline. Expiry alone does not prove that a workload was removed, so pending, active, deleting and uncertain reservations still count until absence is positively verified.
+Create TTLs are at least 60 seconds and at most the configured gateway `CHATSANDBOX_MAX_TTL_SECONDS` (default 7200), additionally restricted by the CRS grant or Key expiry. Renewing an instance cannot reset its original maximum deadline. Expiry alone does not prove that a workload was removed, so pending, active, deleting and uncertain reservations still count until absence is positively verified. `CHATSANDBOX_MAX_STORAGE_MIB`, when set on the server profile, caps each explicit storage request and the aggregate of non-absent ledger reservations; Kubernetes ResourceQuota and actual worker disk are independent bounds. When a client omits storage, a cluster LimitRange may inject a default; this does not count as an explicit storage attestation in the receipt.
 
 Gateway requests require at least 100m CPU and 64Mi memory, matching the fixed init container's requests/limits. Since the init container finishes before the main container starts, this keeps the effective Pod request within the caller's reserved CPU/memory. The namespace also applies its independent resource quota and per-container limits.
 
@@ -129,6 +135,7 @@ Gateway hosts use a separate private `ChatSandbox` server profile:
 | `CHATSANDBOX_INTERNAL_KEY_FILE` / `CHATSANDBOX_SIGNING_KEY_FILE` | On-target private credential/signing file references. They are not caller profile fields. |
 | `CHATSANDBOX_PUBLIC_ORIGIN` | Existing shared public HTTPS origin. |
 | `CHATSANDBOX_KUBECONFIG` / `CHATSANDBOX_NAMESPACE` | Dedicated read-only evidence kubeconfig and workload namespace; no cluster-admin credential in consumers. |
+| `CHATSANDBOX_MAX_STORAGE_MIB` / `CHATSANDBOX_MAX_TTL_SECONDS` | Optional explicit-storage reservation budget and maximum requested lifetime. Neither grants physical disk capacity or overrides the caller's CRS grant. |
 
 Reverse-proxy the selected loopback port through the existing HTTPS entry. Keep the native API and ingress private. Human website authentication remains ChatLogin; Sandbox SDK authentication uses CRS grants. The Task model/tool broker retains its separate task-scoped JWT and lease contract.
 

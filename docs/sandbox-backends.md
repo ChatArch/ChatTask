@@ -29,6 +29,8 @@ TaskService 委托公共后端 `connection`、`connect`、`create`、`inspect_ow
 
 远程 Kubernetes 后端通过受保护的运行证据接口验证资源、特权、宿主命名空间/挂载、ServiceAccount 和 PIDs 策略。Task 不接收集群管理员凭据，也不通过本机 Docker inventory 判断远程 Pod。缺失、归属不明或策略不匹配的证据保持失败，不将 HTTP200 等同于安全检查通过。
 
+资源规格由 ChatSandbox 命名 profile 的 `CHATSANDBOX_CPU_MILLIS`、`CHATSANDBOX_MEMORY_MIB`、`CHATSANDBOX_STORAGE_MIB`（临时盘 MiB）、`CHATSANDBOX_PIDS_LIMIT` 和 `CHATSANDBOX_MAX_TTL_SECONDS` 决定。客户端创建时同时提交相同的 Kubernetes requests/limits；Gateway 另外用 `CHATSANDBOX_MAX_STORAGE_MIB` 限制显式存储请求的单实例及总预留。CRS grant、namespace ResourceQuota、LimitRange 和 worker allocatable 仍分别约束最终可用规格，profile 数字不能替代真实资源证据。
+
 durable Run 的 `purpose=chattask` 与 `durable_run_id` 元数据继续参与恢复查验。创建响应丢失时，公共后端仍需从控制面确认该 Run 是否留下实例；只有明确无实例且模型/工具租约关闭，才能解除恢复围栏。实例删除、TTL 清理或连接失败的结果不明时，不能虚报回收或自动重放写入。
 
 Research 对原 Overleaf 的独立编译仍是显式的本机 Docker 能力，仅配置该功能时建立与关闭其自己的客户端；它与所选 Sandbox provider 分开。使用远程 Sandbox 本身不会触发本机 Docker 连接。
@@ -67,7 +69,11 @@ chattask --tree
 chatsandbox --tree
 ```
 
-首次公开发布应先完成 ChatSandbox 的 PR、检查、合并、标签及 PyPI 产物验收，再发布依赖其兼容版本的 ChatTask。Task 的 tag workflow 会先检查兼容 ChatSandbox wheel 可用，阻止发布缺少依赖的发行包。本次源码变更本身不发布 registry、不切换现有服务；真实 Docker/K8s、SDK、网页和模型/工具链路由部署验收另行确认。
+首次公开发布应先完成 ChatSandbox 的 PR、检查、合并、标签及 PyPI 产物验收，再发布依赖其兼容版本的 ChatTask。Task 的 tag workflow 会先检查兼容 ChatSandbox wheel 可用，阻止发布缺少依赖的发行包。Recall 生产目前安装的是任务定向构建的未发布 wheel；这不等于 PyPI 已更新，其他消费机器也不会自动获得它。
+
+## Recall 生产实测边界（2026-11-23）
+
+当前 `cluster` profile 与 CRS grant/namespace 共同允许 **1 个实例，32 CPU、96GiB 内存、300GiB 临时盘、最长 2 小时**。已在 `auc` worker 真实创建同规格 Pod，完成短 Python 命令、运行证据核验和删除后无残留；尚未进行持续高负载、完整 300GiB 写盘、SageMath/Mathlib 构建或 6 小时耐久验收。CRS 授权代码上限仍为 32 CPU/96GiB/7200s；**256GiB 与 6 小时当前不可用**。共享存储与多实例并行构建未提供。不得将一次短 smoke 写成这些工作负载的验收。
 
 ## 创建和发布环境镜像
 

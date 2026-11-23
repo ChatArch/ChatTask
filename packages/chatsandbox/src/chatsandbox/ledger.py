@@ -27,6 +27,9 @@ class Ledger:
                 cpu_millis INTEGER NOT NULL, memory_mib INTEGER NOT NULL,
                 created REAL NOT NULL, expires_at REAL NOT NULL, max_deadline REAL NOT NULL,
                 metadata TEXT NOT NULL, body_hash TEXT NOT NULL)''')
+            columns = {row[1] for row in db.execute('PRAGMA table_info(instances)')}
+            if 'storage_mib' not in columns:
+                db.execute('ALTER TABLE instances ADD COLUMN storage_mib INTEGER')
 
     @contextmanager
     def transaction(self):
@@ -41,9 +44,14 @@ class Ledger:
         finally:
             db.close()
 
-    def reserve(self, grant, body, *, image, cpu, memory, ttl, idempotency=None):
+    def reserve(self, grant, body, *, image, cpu, memory, ttl, idempotency=None,
+                storage_mib=None, storage_budget_mib=None):
         if ttl <= 0 or ttl > grant.max_ttl_seconds: raise AccessDenied(400, 'sandbox_ttl_invalid')
         if image not in grant.images: raise AccessDenied(403, 'sandbox_image_denied')
+        if storage_mib is not None and (type(storage_mib) is not int or storage_mib <= 0):
+            raise ValueError('Storage target must be a positive integer or absent')
+        if storage_budget_mib is not None and (type(storage_budget_mib) is not int or storage_budget_mib <= 0):
+            raise ValueError('Storage budget must be a positive integer or absent')
         if idempotency is not None and (not isinstance(idempotency,str) or not 1 <= len(idempotency) <= 128 or any(ord(c)<33 or ord(c)>126 for c in idempotency)):
             raise AccessDenied(400, 'invalid_idempotency_key')
         request_id = hashlib.sha256((grant.caller_id + '\0' + idempotency).encode()).hexdigest()[:32] if idempotency else uuid.uuid4().hex
@@ -58,10 +66,18 @@ class Ledger:
                     raise AccessDenied(409, 'idempotency_conflict')
                 return dict(old), False
             used = db.execute("SELECT COUNT(*),COALESCE(SUM(cpu_millis),0),COALESCE(SUM(memory_mib),0) FROM instances WHERE caller_id=? AND state!='absent'", (grant.caller_id,)).fetchone()
-            if used[0] + 1 > grant.max_sandboxes or used[1] + cpu > grant.max_cpu_millis or used[2] + memory > grant.max_memory_mib:
+            used_storage = db.execute("SELECT COALESCE(SUM(storage_mib),0) FROM instances WHERE state!='absent'").fetchone()[0]
+            if (used[0] + 1 > grant.max_sandboxes or used[1] + cpu > grant.max_cpu_millis or
+                    used[2] + memory > grant.max_memory_mib or
+                    storage_budget_mib is not None and used_storage + (storage_mib or 0) > storage_budget_mib):
                 raise AccessDenied(429, 'sandbox_budget_exhausted')
-            db.execute('INSERT INTO instances VALUES (?,?,?,NULL,?,?,?,?,?,?,?,?,?)',
-                       (request_id,grant.caller_id,grant.key_id,'pending',image,cpu,memory,now,now+ttl,deadline,json.dumps(body.get('metadata') or {},sort_keys=True),fingerprint))
+            db.execute('''INSERT INTO instances
+                (request_id, caller_id, key_id, sandbox_id, state, image,
+                 cpu_millis, memory_mib, storage_mib, created, expires_at, max_deadline,
+                 metadata, body_hash)
+                VALUES (?,?,?,NULL,?,?,?,?,?,?,?,?,?,?)''',
+                       (request_id,grant.caller_id,grant.key_id,'pending',image,cpu,memory,storage_mib,
+                        now,now+ttl,deadline,json.dumps(body.get('metadata') or {},sort_keys=True),fingerprint))
             return dict(db.execute('SELECT * FROM instances WHERE request_id=?',(request_id,)).fetchone()), True
 
     def activate(self, request_id, sandbox_id):

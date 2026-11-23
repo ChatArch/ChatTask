@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from .auth import AccessDenied
 from .config import origin
 from .routing import OWNER,REQUEST,RouteTokens,identity,create_policy,metadata_filter,expiration,data_action
-from . import proxy
+from . import proxy, __version__
 
 
 @dataclass(frozen=True)
@@ -26,11 +26,17 @@ class GatewaySettings:
     public_origin: str
     api_key: str=field(repr=False)
     signing_key: bytes=field(repr=False)
+    max_ttl_seconds: int=7200
+    max_storage_mib: int | None=None
 
     def __post_init__(self):
         for value in [self.upstream,self.ingress,self.public_origin]: origin(value)
         if not self.public_origin.startswith('https://') or len(self.signing_key)<32 or not self.api_key:
             raise ValueError('Gateway requires public HTTPS and private authentication material')
+        if type(self.max_ttl_seconds) is not int or not 60<=self.max_ttl_seconds<=2**31-1:
+            raise ValueError('Gateway max TTL must be an integer between 60 and 2^31-1 seconds')
+        if self.max_storage_mib is not None and (type(self.max_storage_mib) is not int or self.max_storage_mib <= 0):
+            raise ValueError('Gateway maximum storage must be a positive integer or absent')
 
 
 def create_app(settings,*,verifier,evidence,ledger,transport=None,reconcile_interval=15):
@@ -78,7 +84,7 @@ def create_app(settings,*,verifier,evidence,ledger,transport=None,reconcile_inte
         return JSONResponse({'code':error.code,'message':error.code},status_code=error.status,headers={'Cache-Control':'no-store'})
 
     @app.get('/health')
-    async def health(): return {'status':'ready','package':'ChatSandbox','version':'0.1.0'}
+    async def health(): return {'status':'ready','package':'ChatSandbox','version':__version__}
 
     async def json_body(request):
         data=bytearray()
@@ -96,7 +102,7 @@ def create_app(settings,*,verifier,evidence,ledger,transport=None,reconcile_inte
 
     async def checked_runtime(row):
         try:
-            runtime=await run_in_threadpool(lambda:evidence.inspect_owned(row['sandbox_id'],metadata={REQUEST:row['request_id']},cpu_millis=row['cpu_millis'],memory_mib=row['memory_mib']))
+            runtime=await run_in_threadpool(lambda:evidence.inspect_owned(row['sandbox_id'],metadata={REQUEST:row['request_id']},cpu_millis=row['cpu_millis'],memory_mib=row['memory_mib'],storage_mib=row['storage_mib']))
             if runtime.get('pids_limit')!=128 or runtime.get('pids_limit_attested') is not True:
                 raise ValueError('Runtime policy is not attested')
             return runtime
@@ -132,8 +138,11 @@ def create_app(settings,*,verifier,evidence,ledger,transport=None,reconcile_inte
         grant=await authenticated(request)
         if request.method=='POST':
             grant.require('create'); body=await json_body(request)
-            image,cpu,memory,ttl=create_policy(body)
-            row,new=await run_in_threadpool(lambda:ledger.reserve(grant,body,image=image,cpu=cpu,memory=memory,ttl=ttl,idempotency=request.headers.get('idempotency-key')))
+            image,cpu,memory,storage,ttl=create_policy(body,max_ttl_seconds=settings.max_ttl_seconds,
+                                                       max_storage_mib=settings.max_storage_mib)
+            row,new=await run_in_threadpool(lambda:ledger.reserve(grant,body,image=image,cpu=cpu,memory=memory,ttl=ttl,
+                idempotency=request.headers.get('idempotency-key'),storage_mib=storage,
+                storage_budget_mib=settings.max_storage_mib))
             if not new:
                 if row['state']=='active': return raw(await native('GET','/v1/sandboxes/'+row['sandbox_id']))
                 raise AccessDenied(409,'sandbox_creation_pending' if row['state']!='absent' else 'sandbox_request_already_finished')

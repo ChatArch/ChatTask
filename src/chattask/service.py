@@ -57,9 +57,16 @@ class TaskService:
             raise ValueError('invalid durable Run id')
         return await self.backend.find_owned({'purpose': 'chattask', 'durable_run_id': run_id})
 
+    def _max_ttl_seconds(self) -> int:
+        candidate = getattr(getattr(self.backend, 'settings', None), 'max_ttl_seconds', 7200)
+        if type(candidate) is not int or not 60 <= candidate <= 2**31 - 1:
+            return 7200
+        return candidate
+
     async def create(self, *, ttl_seconds: int = 600, durable_run_id: str | None = None):
-        if type(ttl_seconds) is not int or not 60 <= ttl_seconds <= 7200:
-            raise ValueError('sandbox lifetime must be 60–7200 seconds')
+        max_ttl = self._max_ttl_seconds()
+        if type(ttl_seconds) is not int or not 60 <= ttl_seconds <= max_ttl:
+            raise ValueError(f'sandbox lifetime must be 60–{max_ttl} seconds')
         if durable_run_id is not None and (not isinstance(durable_run_id, str) or len(durable_run_id) != 32 or any(c not in '0123456789abcdef' for c in durable_run_id)):
             raise ValueError('invalid durable Run id')
         return await self.backend.create(ttl_seconds=ttl_seconds,

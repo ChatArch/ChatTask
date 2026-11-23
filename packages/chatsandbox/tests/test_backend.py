@@ -159,13 +159,34 @@ def test_create_passes_native_resources_metadata_and_closes_on_policy_failure():
     async def run():
         assert await backend.create(ttl_seconds=120, metadata={'purpose': 'chattask'}) == (sandbox, cfg, {'receipt': 'stable'})
         kwargs = sdk.create.call_args.kwargs
-        assert kwargs['resource'] == {'cpu': '1', 'memory': '512Mi'}
+        expected_resources = {'cpu': '1', 'memory': '512Mi'}
+        assert kwargs['resource'] == expected_resources
+        assert kwargs['resource_requests'] == expected_resources
         assert kwargs['timeout'] == timedelta(seconds=120)
+        assert kwargs['entrypoint'] == ['/bin/sh', '-c', 'sleep infinity']
         assert kwargs['metadata'] == {'purpose': 'chattask'}
         evidence.inspect_owned.side_effect = RuntimeError('resource policy mismatch')
         with pytest.raises(RuntimeError, match='policy mismatch'): await backend.create(ttl_seconds=120)
         sandbox.destroy.assert_awaited_once()
         cfg.transport.aclose.assert_awaited_once()
+    asyncio.run(run())
+
+
+def test_create_passes_ephemeral_storage_when_configured():
+    sandbox = SimpleNamespace(id='owned', destroy=AsyncMock())
+    sdk = SimpleNamespace(create=AsyncMock(return_value=sandbox))
+    evidence = SimpleNamespace(inspect_owned=Mock(return_value={'receipt': 'stable'}))
+    settings = BackendSettings('https://sandbox.example.test', 'synthetic-unit-test-credential',
+                               image='approved-image', cpu_millis=2000, memory_mib=8192,
+                               storage_mib=51200)
+    backend = SandboxBackend(settings, evidence=evidence, sdk=sdk)
+    backend.connection = lambda: SimpleNamespace(transport=SimpleNamespace(aclose=AsyncMock()))
+    async def run():
+        await backend.create(ttl_seconds=3600)
+        resource = sdk.create.call_args.kwargs['resource']
+        expected_resources = {'cpu': '2', 'memory': '8192Mi', 'ephemeral-storage': '51200Mi'}
+        assert resource == expected_resources
+        assert sdk.create.call_args.kwargs['resource_requests'] == expected_resources
     asyncio.run(run())
 
 

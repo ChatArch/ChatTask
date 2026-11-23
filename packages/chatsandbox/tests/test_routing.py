@@ -17,10 +17,44 @@ def body():
 
 def test_native_resource_quantities_and_metadata_encoding():
     value = body()
-    assert create_policy(value) == ('python:3.10-slim', 1000, 512, 120)
+    assert create_policy(value) == ('python:3.10-slim', 1000, 512, None, 120)
     value['resourceLimits'] = {'cpu': '250m', 'memory': '2Gi'}
-    assert create_policy(value) == ('python:3.10-slim', 250, 2048, 120)
+    assert create_policy(value) == ('python:3.10-slim', 250, 2048, None, 120)
+    value['resourceLimits'] = {'cpu': '2', 'memory': '8Gi', 'ephemeral-storage': '50Gi'}
+    value['resourceRequests'] = value['resourceLimits']
+    assert create_policy(value) == ('python:3.10-slim', 2000, 8192, 51200, 120)
     assert metadata_filter('purpose=chattask&durable_run_id=' + 'a' * 32) == value['metadata']
+
+
+def test_ephemeral_storage_requests_must_match_limits_and_uses_binary_quantities():
+    value = body()
+    value['resourceLimits'] = {'cpu': '2', 'memory': '8Gi', 'ephemeral-storage': '51200Mi'}
+    value['resourceRequests'] = dict(value['resourceLimits'], **{'ephemeral-storage': '49Gi'})
+    with pytest.raises(AccessDenied):
+        create_policy(value)
+    value['resourceRequests'] = value['resourceLimits']
+    assert create_policy(value)[3] == 51200
+
+
+def test_storage_limit_is_bounded_by_gateway_policy():
+    value = body()
+    value['resourceLimits']['ephemeral-storage'] = '51Gi'
+    with pytest.raises(AccessDenied, match='invalid_sandbox_resources'):
+        create_policy(value, max_storage_mib=51200)
+    value['resourceLimits']['ephemeral-storage'] = '50Gi'
+    assert create_policy(value, max_storage_mib=51200)[3] == 51200
+
+
+def test_ttl_is_bounded_by_the_deployed_gateway_policy():
+    value = body()
+    assert create_policy(value, max_ttl_seconds=43200)[-1] == 120
+    value['timeout'] = 43200
+    assert create_policy(value, max_ttl_seconds=43200)[-1] == 43200
+    with pytest.raises(AccessDenied):
+        create_policy(value)
+    value['timeout'] = 43201
+    with pytest.raises(AccessDenied):
+        create_policy(value, max_ttl_seconds=43200)
 
 
 @pytest.mark.parametrize('change', [
@@ -30,6 +64,8 @@ def test_native_resource_quantities_and_metadata_encoding():
     {'resourceLimits': {'cpu': '1', 'memory': '0Mi'}},
     {'resourceLimits': {'cpu': '1m', 'memory': '512Mi'}},
     {'resourceLimits': {'cpu': '1', 'memory': '32Mi'}},
+    {'resourceLimits': {'cpu': '1', 'memory': '512Mi', 'ephemeral-storage': '50GB'}},
+    {'resourceLimits': {'cpu': '1', 'memory': '512Mi', 'gpu': '1'}},
     {'resourceRequests': {'cpu': '500m', 'memory': '512Mi'}},
     {'timeout': True}, {'timeout': 7201}, {'volumes': [{'hostPath': '/'}]},
     {'networkPolicy': {'defaultAction': 'allow'}}, {'metadata': {OWNER: 'forged'}},

@@ -19,6 +19,13 @@ def test_native_analysis_tab_and_authenticated_deep_link_are_wired():
     assert "$('workspace-view').hidden = key !== 'workspace'" in js
 
 
+def test_sandbox_capacity_note_distinguishes_sdk_limit_from_web_sessions():
+    html = (ROOT/'src/chattask/web_static/index.html').read_text()
+    assert '32 CPU / 96GiB' in html and '300GiB 临时盘 / 2 小时' in html
+    assert '未验证满载或满盘' in html
+    assert '网页任务和短会话仍受各自模板与会话时长限制' in html
+
+
 def test_workspace_result_renderer_is_read_only_text_and_rejects_stale_responses():
     js=(ROOT/'src/chattask/web_static/app.js').read_text()
     assert '// Native Workspace material-analysis results' in js

@@ -15,6 +15,7 @@
       <h1>交给任务，<em>把结果交到手中。</em></h1>
       <p class="intro">描述任务，选择具备所需工具的镜像，让 Codex 在独立 Sandbox 中执行。结果、产物和回收记录统一留在 ChatTask；发包只是其中一种任务。</p>
       <div class="note"><strong>实验边界</strong><span>登录后可操作 · 镜像提供 infra · 外部工具有受限权限 · 普通 runc 不等于敌对多租户强隔离</span></div>
+      <p class="meta-note">Sandbox SDK 网关当前单实例上限：32 CPU / 96GiB 内存 / 300GiB 临时盘 / 2 小时。已完成同规格短命令创建、执行、删除验收；未验证满载或满盘，未提供 256GiB、6 小时、多实例共享存储与 SageMath/Mathlib 专用镜像。网页任务和短会话仍受各自模板与会话时长限制，不因网关上限自动延长。</p>
     </header>
 
     <nav class="primary-nav" aria-label="主要功能">

@@ -193,6 +193,27 @@ def test_sandbox_creation_and_recovery_preserve_run_identity_for_shared_backend(
     asyncio.run(run())
 
 
+def test_task_service_uses_shared_backend_configured_ttl_limit():
+    class Settings:
+        max_ttl_seconds = 43200
+
+    class Backend:
+        settings = Settings()
+        def __init__(self): self.requested = []
+        async def create(self, *, ttl_seconds, metadata):
+            self.requested.append(ttl_seconds)
+            return SimpleNamespace(id='long-sandbox'), None, {'provider': 'kubernetes'}
+
+    backend = Backend()
+    service = TaskService(TaskSettings('http://127.0.0.1:1234', 'synthetic'), backend=backend)
+    async def run():
+        await service.create(ttl_seconds=43200)
+        with pytest.raises(ValueError, match='60.*43200'):
+            await service.create(ttl_seconds=43201)
+    asyncio.run(run())
+    assert backend.requested == [43200]
+
+
 @pytest.mark.parametrize('failure_point', ['create', 'callback'])
 def test_gateway_lease_closes_before_or_after_sandbox_receipt_failure(monkeypatch, failure_point):
     async def inline(fn, *args, **kwargs): return fn(*args, **kwargs)

@@ -103,6 +103,44 @@ def test_valid_runtime_evidence_excludes_secrets(state):
     assert state.config_calls == ['/synthetic/evidence.kubeconfig']
 
 
+def test_ephemeral_storage_is_verified_and_reported(state):
+    resources = state.pods[0]['spec']['containers'][0]['resources']
+    resources['requests']['ephemeral-storage'] = '50Gi'
+    resources['limits']['ephemeral-storage'] = '53687091200'
+    evidence = Reader(kubeconfig='/synthetic/evidence.kubeconfig').inspect_owned(
+        ID, metadata=META, cpu_millis=1000, memory_mib=512, storage_mib=51200)
+    assert evidence['storage_mib'] == 51200
+    assert evidence['ephemeral_storage_bytes'] == 51200 * 1024 ** 2
+
+
+def test_unrequested_storage_allows_limitrange_default_and_stays_unattested(state):
+    # The cluster LimitRange injects a default ephemeral-storage even when the
+    # caller did not request one. Evidence must not fail closed on that platform
+    # default, but must also not claim a storage reservation it was not given.
+    resources = state.pods[0]['spec']['containers'][0]['resources']
+    resources['requests']['ephemeral-storage'] = '256Mi'
+    resources['limits']['ephemeral-storage'] = '1Gi'
+    evidence = Reader(kubeconfig='/synthetic/evidence.kubeconfig').inspect_owned(
+        ID, metadata=META, cpu_millis=1000, memory_mib=512, storage_mib=None)
+    assert evidence['storage_mib'] is None
+    assert evidence['ephemeral_storage_bytes'] is None
+
+
+def test_storage_mismatch_or_missing_expected_storage_fails_closed(state):
+    resources = state.pods[0]['spec']['containers'][0]['resources']
+    resources['requests']['ephemeral-storage'] = '49Gi'
+    resources['limits']['ephemeral-storage'] = '50Gi'
+    with pytest.raises(EvidenceError, match='storage policy mismatch'):
+        Reader(kubeconfig='/synthetic/evidence.kubeconfig').inspect_owned(
+            ID, metadata=META, storage_mib=51200)
+
+    resources['requests']['ephemeral-storage'] = '50Gi'
+    resources['limits'].pop('ephemeral-storage')
+    with pytest.raises(EvidenceError, match='storage policy mismatch'):
+        Reader(kubeconfig='/synthetic/evidence.kubeconfig').inspect_owned(
+            ID, metadata=META, storage_mib=51200)
+
+
 def test_default_identity_is_incluster_never_admin_fallback(state):
     Reader()
     assert state.config_calls == ['incluster']
